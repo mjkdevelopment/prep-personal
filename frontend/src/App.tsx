@@ -270,7 +270,9 @@ function insightTone(insight: BootstrapResponse['dashboard']['generated_insights
 }
 
 function App() {
-  const isOwnerRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/owner')
+  const [routePath, setRoutePath] = useState(() => typeof window === 'undefined' ? '/' : window.location.pathname)
+  const isOwnerRoute = routePath.startsWith('/owner')
+  const isLoginRoute = routePath === '/login'
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null)
   const [data, setData] = useState<BootstrapResponse | null>(null)
   const [ownerData, setOwnerData] = useState<OwnerPanelResponse | null>(null)
@@ -300,6 +302,38 @@ function App() {
   useEffect(() => {
     applyTheme(selectedTheme)
   }, [selectedTheme])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const handlePopState = () => {
+      setRoutePath(window.location.pathname)
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => {
+      window.removeEventListener('popstate', handlePopState)
+    }
+  }, [])
+
+  const navigate = (path: string, mode: 'push' | 'replace' = 'push') => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    if (window.location.pathname === path) {
+      setRoutePath(path)
+      return
+    }
+
+    if (mode === 'replace') {
+      window.history.replaceState(null, '', path)
+    } else {
+      window.history.pushState(null, '', path)
+    }
+    setRoutePath(path)
+  }
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -357,8 +391,16 @@ function App() {
         if (cancelled) {
           return
         }
+        setError(null)
+        setAuthError(null)
         setAuthStatus(status)
         if (status.authenticated) {
+          if (status.role === 'owner' && !isOwnerRoute) {
+            navigate('/owner', 'replace')
+          }
+          if (status.role !== 'owner' && isLoginRoute) {
+            navigate('/', 'replace')
+          }
           if (isOwnerRoute && status.role !== 'owner') {
             clearSessionToken()
             setAuthStatus({ ...status, authenticated: false, username: null, role: null, can_edit_data: false, can_manage_users: false })
@@ -369,12 +411,20 @@ function App() {
           }
           await load()
         } else {
+          if (!isOwnerRoute && !isLoginRoute) {
+            navigate('/login', 'replace')
+          }
           setData(null)
           setOwnerData(null)
         }
       } catch (bootError) {
         if (!cancelled) {
-          setAuthError(resolveErrorMessage(bootError, 'No se pudo validar la sesion.'))
+          const message = resolveErrorMessage(bootError, 'No se pudo validar la sesion.')
+          if (authStatus?.authenticated) {
+            setError(message)
+          } else {
+            setAuthError(message)
+          }
         }
       } finally {
         if (!cancelled) {
@@ -414,6 +464,11 @@ function App() {
   }, [authStatus?.authenticated, transactionForm.amount, transactionForm.kind])
 
   const refreshAfterAuth = async (response?: LoginResponse) => {
+    if (response?.role === 'owner') {
+      navigate('/owner', 'replace')
+    } else {
+      navigate('/', 'replace')
+    }
     setAuthStatus({
       authenticated: true,
       has_users: response?.has_users ?? true,
@@ -610,6 +665,9 @@ function App() {
     try {
       await changePassword(passwordForm.currentPassword, passwordForm.newPassword)
       clearSessionToken()
+      if (!isOwnerRoute) {
+        navigate('/login', 'replace')
+      }
       setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, owner_bootstrap_warning: current?.owner_bootstrap_warning ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
       setData(null)
       setOwnerData(null)
@@ -629,6 +687,9 @@ function App() {
     } catch {
       clearSessionToken()
     } finally {
+      if (!isOwnerRoute) {
+        navigate('/login', 'replace')
+      }
       setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, owner_bootstrap_warning: current?.owner_bootstrap_warning ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
       setData(null)
       setOwnerData(null)
