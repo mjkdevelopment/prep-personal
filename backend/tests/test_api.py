@@ -3,6 +3,7 @@ import json
 import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -446,3 +447,15 @@ def test_auto_bootstrap_owner_from_env_only_runs_once() -> None:
         else:
             os.environ['OWNER_BOOTSTRAP_THEME_ID'] = original_theme
         database.db_path = str(Path(_temp_directory.name) / 'test_app.db')
+
+
+def test_default_db_path_prefers_data_mount_when_present() -> None:
+    railway_env = {key: value for key, value in os.environ.items() if key.startswith('RAILWAY_')}
+    try:
+        for key in railway_env:
+            os.environ.pop(key, None)
+
+        with patch('backend.app.database.Path.is_dir', return_value=True):
+            assert database._default_db_path() == '/data/gride_ledger.db'
+    finally:
+        os.environ.update(railway_env)

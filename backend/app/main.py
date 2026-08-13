@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import json
 import logging
+import os
 from pathlib import Path
 import sqlite3
 from tempfile import NamedTemporaryFile
@@ -25,12 +26,39 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     database.startup_warning = None
+    db_file = Path(database.db_path)
+    existed_before_startup = db_file.exists()
     database.initialize()
     try:
         database.auto_bootstrap_owner_from_env()
     except RuntimeError as exc:
         database.startup_warning = str(exc)
         logger.exception('Owner bootstrap automatico omitido: %s', exc)
+
+    has_users = database.has_users()
+    has_owner = database.has_owner()
+    db_exists = db_file.exists()
+    db_size = db_file.stat().st_size if db_exists else 0
+    logger.warning(
+        'Startup DB diagnostics | path=%s | existed_before=%s | exists_now=%s | size=%s | has_users=%s | has_owner=%s',
+        database.db_path,
+        existed_before_startup,
+        db_exists,
+        db_size,
+        has_users,
+        has_owner,
+    )
+
+    if not has_owner:
+        warning_parts: list[str] = []
+        if database.startup_warning:
+            warning_parts.append(database.startup_warning)
+        warning_parts.append(f'No existe cuenta owner en la base activa ({database.db_path}).')
+        if not existed_before_startup:
+            warning_parts.append('Este arranque creo un archivo SQLite nuevo; si esperabas tus usuarios anteriores, revisa el volumen persistente de Railway.')
+        if any(name.startswith('RAILWAY_') for name in os.environ) and not database.db_path.startswith('/data/'):
+            warning_parts.append('APP_DB_PATH no apunta a /data. Define APP_DB_PATH=/data/gride_ledger.db y monta el volumen en /data.')
+        database.startup_warning = ' '.join(warning_parts)
     yield
 
 

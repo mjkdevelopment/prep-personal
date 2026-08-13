@@ -550,7 +550,8 @@ class Database:
 
     @staticmethod
     def _default_db_path() -> str:
-        if any(name.startswith('RAILWAY_') for name in os.environ):
+        data_dir = Path('/data')
+        if any(name.startswith('RAILWAY_') for name in os.environ) or data_dir.is_dir():
             return '/data/gride_ledger.db'
         return 'backend/data/gride_ledger.db'
 
