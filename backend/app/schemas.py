@@ -50,6 +50,9 @@ class FixedIncomeSourceCreate(FixedIncomeSourceBase):
 
 class FixedIncomeSource(FixedIncomeSourceBase):
     id: int
+    current_period_expected_amount: float = 0
+    current_period_recorded_amount: float = 0
+    current_period_balance: float = 0
 
 
 class ObligationBase(BaseModel):
@@ -69,6 +72,10 @@ class ObligationCreate(ObligationBase):
 
 class Obligation(ObligationBase):
     id: int
+    current_period_expected_amount: float = 0
+    current_period_recorded_amount: float = 0
+    current_period_balance: float = 0
+    current_period_status: str = 'Pendiente'
 
 
 class TransactionBase(BaseModel):
@@ -76,6 +83,8 @@ class TransactionBase(BaseModel):
     amount: float = Field(gt=0)
     wallet: str = Field(min_length=1)
     category: str = Field(min_length=1)
+    fixed_income_source_id: Optional[int] = None
+    obligation_id: Optional[int] = None
     tags: list[str] = Field(default_factory=list)
     notes: str = ''
     date: datetime

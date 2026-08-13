@@ -249,6 +249,96 @@ def test_dashboard_monthly_expected_converts_weekly_and_biweekly_amounts() -> No
     assert payload['dashboard']['quincena_reserve_views'][2]['amount'] == 10000
 
 
+def test_linked_transactions_update_current_period_progress() -> None:
+    headers = ensure_app_headers('linkedprogress', '1234')
+    setup = client.post(
+        '/api/setup/complete',
+        json={
+            'fixed_income_sources': [
+                {
+                    'label': 'Nomina fija',
+                    'amount': 1000,
+                    'cadence': 'monthly',
+                    'expected_day': 30,
+                    'expected_weekday': None,
+                    'wallet': 'Banco',
+                    'active': True,
+                }
+            ],
+            'obligations': [
+                {
+                    'label': 'Renta',
+                    'amount': 800,
+                    'category_id': 'casa',
+                    'cadence': 'monthly',
+                    'due_day': 15,
+                    'due_weekday': None,
+                    'kind': 'Fija',
+                    'status': 'Pendiente',
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert setup.status_code == 200
+
+    bootstrap = client.get('/api/bootstrap', headers=headers)
+    payload = bootstrap.json()
+    fixed_income_id = payload['fixed_income_sources'][0]['id']
+    obligation_id = payload['obligations'][0]['id']
+
+    income_tx = client.post(
+        '/api/transactions',
+        json={
+            'kind': 'ingreso',
+            'amount': 600,
+            'wallet': 'Banco',
+            'category': 'Nomina fija',
+            'fixed_income_source_id': fixed_income_id,
+            'obligation_id': None,
+            'tags': [],
+            'notes': 'Parcial de nomina',
+            'date': '2026-08-13T10:00:00',
+            'recurring': False,
+        },
+        headers=headers,
+    )
+    assert income_tx.status_code == 200
+
+    expense_tx = client.post(
+        '/api/transactions',
+        json={
+            'kind': 'gasto',
+            'amount': 500,
+            'wallet': 'Banco',
+            'category': 'Casa',
+            'fixed_income_source_id': None,
+            'obligation_id': obligation_id,
+            'tags': [],
+            'notes': 'Abono de renta',
+            'date': '2026-08-13T12:00:00',
+            'recurring': False,
+        },
+        headers=headers,
+    )
+    assert expense_tx.status_code == 200
+
+    refreshed = client.get('/api/bootstrap', headers=headers)
+    assert refreshed.status_code == 200
+    refreshed_payload = refreshed.json()
+    fixed_income = refreshed_payload['fixed_income_sources'][0]
+    obligation = refreshed_payload['obligations'][0]
+
+    assert fixed_income['current_period_expected_amount'] == 1000
+    assert fixed_income['current_period_recorded_amount'] == 600
+    assert fixed_income['current_period_balance'] == 400
+    assert obligation['current_period_expected_amount'] == 800
+    assert obligation['current_period_recorded_amount'] == 500
+    assert obligation['current_period_balance'] == 300
+    assert obligation['current_period_status'] == 'Parcial'
+    assert refreshed_payload['dashboard']['quincena_coverage'] == 0.625
+
+
 def test_category_and_tag_upsert_require_auth() -> None:
     headers = ensure_app_headers('cataloguser', '1234')
     category_response = client.post('/api/categories', json={'id': 'mascotas', 'label': 'Mascotas', 'scope': 'expense', 'type': 'Variable', 'color_token': 'plum', 'icon_token': 'favorite', 'active': True}, headers=headers)

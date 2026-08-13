@@ -61,9 +61,9 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     now = datetime.now()
     fixed_income_expected = sum(_monthly_expected_amount(item.amount, item.cadence) for item in fixed_income_sources if item.active)
     income_reported_this_month = sum(item.amount for item in transactions if _is_income(item.kind) and item.date.year == now.year and item.date.month == now.month)
-    pending_obligations_total = sum(_monthly_expected_amount(item.amount, item.cadence) for item in obligations if item.status != 'Cubierto')
-    obligations_target = sum(_monthly_expected_amount(item.amount, item.cadence) for item in obligations)
-    obligations_reserved = sum(_monthly_expected_amount(item.amount, item.cadence) for item in obligations if item.status in {'Cubierto', 'Parcial'})
+    pending_obligations_total = sum(item.current_period_balance for item in obligations)
+    obligations_target = sum(item.current_period_expected_amount for item in obligations)
+    obligations_reserved = sum(item.current_period_recorded_amount for item in obligations)
     goals_target = fixed_income_expected * 0.20
     goals_reserved = sum(item.amount for item in transactions if item.kind in {'ahorro', 'inversion', 'deuda'})
     personal_spent_this_month = sum(item.amount for item in transactions if item.kind == 'gasto' and item.date.year == now.year and item.date.month == now.month)

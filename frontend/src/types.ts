@@ -12,6 +12,9 @@ export interface FixedIncomeSource {
   expected_weekday: number | null
   wallet: string
   active: boolean
+  current_period_expected_amount: number
+  current_period_recorded_amount: number
+  current_period_balance: number
 }
 
 export interface Obligation {
@@ -24,6 +27,10 @@ export interface Obligation {
   due_weekday: number | null
   kind: string
   status: string
+  current_period_expected_amount: number
+  current_period_recorded_amount: number
+  current_period_balance: number
+  current_period_status: string
 }
 
 export interface Transaction {
@@ -32,6 +39,8 @@ export interface Transaction {
   amount: number
   wallet: string
   category: string
+  fixed_income_source_id: number | null
+  obligation_id: number | null
   tags: string[]
   notes: string
   date: string
@@ -209,6 +218,36 @@ export interface UserAccessUpdateInput {
   active: boolean
 }
 
-export type TransactionInput = Omit<Transaction, 'id'>
-export type FixedIncomeSourceInput = Omit<FixedIncomeSource, 'id'>
-export type ObligationInput = Omit<Obligation, 'id'>
+export interface TransactionInput {
+  kind: TransactionKind
+  amount: number
+  wallet: string
+  category: string
+  fixed_income_source_id: number | null
+  obligation_id: number | null
+  tags: string[]
+  notes: string
+  date: string
+  recurring: boolean
+}
+
+export interface FixedIncomeSourceInput {
+  label: string
+  amount: number
+  cadence: FixedIncomeCadence
+  expected_day: number
+  expected_weekday: number | null
+  wallet: string
+  active: boolean
+}
+
+export interface ObligationInput {
+  label: string
+  amount: number
+  category_id: string | null
+  cadence: FixedIncomeCadence
+  due_day: number
+  due_weekday: number | null
+  kind: string
+  status: string
+}

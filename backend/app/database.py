@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 import sqlite3
+import calendar
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -74,6 +75,8 @@ class Database:
             self._ensure_column(connection, 'fixed_income_sources', 'user_id', 'INTEGER')
             self._ensure_column(connection, 'obligations', 'user_id', 'INTEGER')
             self._ensure_column(connection, 'transactions', 'user_id', 'INTEGER')
+            self._ensure_column(connection, 'transactions', 'fixed_income_source_id', 'INTEGER')
+            self._ensure_column(connection, 'transactions', 'obligation_id', 'INTEGER')
             self._ensure_column(connection, 'trusted_sessions', 'user_id', 'INTEGER')
             self._ensure_column(connection, 'users', 'theme_id', "TEXT NOT NULL DEFAULT 'emerald_editorial'")
             self._ensure_column(connection, 'users', 'setup_complete', 'INTEGER NOT NULL DEFAULT 0')
@@ -361,7 +364,8 @@ class Database:
                 'SELECT * FROM fixed_income_sources WHERE user_id = ? ORDER BY cadence ASC, expected_weekday ASC, expected_day ASC, id ASC',
                 (user_id,),
             ).fetchall()
-        return [self._fixed_income(row) for row in rows]
+            progress = self._current_period_totals(connection, user_id, 'fixed_income_source_id', 'ingreso')
+        return [self._fixed_income(row, progress.get(row['id'], 0)) for row in rows]
 
     def create_fixed_income_source(self, user_id: int, payload: dict) -> FixedIncomeSource:
         with self.connect() as connection:
@@ -385,12 +389,14 @@ class Database:
 
     def delete_fixed_income_source(self, user_id: int, item_id: int) -> None:
         with self.connect() as connection:
+            connection.execute('UPDATE transactions SET fixed_income_source_id = NULL WHERE user_id = ? AND fixed_income_source_id = ?', (user_id, item_id))
             connection.execute('DELETE FROM fixed_income_sources WHERE id = ? AND user_id = ?', (item_id, user_id))
 
     def list_obligations(self, user_id: int) -> list[Obligation]:
         with self.connect() as connection:
             rows = connection.execute('SELECT * FROM obligations WHERE user_id = ? ORDER BY cadence ASC, due_weekday ASC, due_day ASC, id ASC', (user_id,)).fetchall()
-        return [self._obligation(row) for row in rows]
+            progress = self._current_period_totals(connection, user_id, 'obligation_id', 'gasto')
+        return [self._obligation(row, progress.get(row['id'], 0)) for row in rows]
 
     def create_obligation(self, user_id: int, payload: dict) -> Obligation:
         with self.connect() as connection:
@@ -414,6 +420,7 @@ class Database:
 
     def delete_obligation(self, user_id: int, item_id: int) -> None:
         with self.connect() as connection:
+            connection.execute('UPDATE transactions SET obligation_id = NULL WHERE user_id = ? AND obligation_id = ?', (user_id, item_id))
             connection.execute('DELETE FROM obligations WHERE id = ? AND user_id = ?', (item_id, user_id))
 
     def list_transactions(self, user_id: int) -> list[Transaction]:
@@ -423,18 +430,20 @@ class Database:
 
     def create_transaction(self, user_id: int, payload: dict) -> Transaction:
         with self.connect() as connection:
+            normalized = self._normalize_transaction_payload(connection, user_id, payload)
             cursor = connection.execute(
-                'INSERT INTO transactions(user_id, kind, amount, wallet, category, tags_json, notes, date_iso, recurring) VALUES(:user_id, :kind, :amount, :wallet, :category, :tags_json, :notes, :date_iso, :recurring)',
-                {**payload, 'user_id': user_id, 'tags_json': json.dumps(payload['tags']), 'date_iso': payload['date'].isoformat(), 'recurring': 1 if payload['recurring'] else 0},
+                'INSERT INTO transactions(user_id, kind, amount, wallet, category, fixed_income_source_id, obligation_id, tags_json, notes, date_iso, recurring) VALUES(:user_id, :kind, :amount, :wallet, :category, :fixed_income_source_id, :obligation_id, :tags_json, :notes, :date_iso, :recurring)',
+                {**normalized, 'user_id': user_id, 'tags_json': json.dumps(normalized['tags']), 'date_iso': normalized['date'].isoformat(), 'recurring': 1 if normalized['recurring'] else 0},
             )
             row = connection.execute('SELECT * FROM transactions WHERE id = ? AND user_id = ?', (cursor.lastrowid, user_id)).fetchone()
         return self._transaction(row)
 
     def update_transaction(self, user_id: int, item_id: int, payload: dict) -> Transaction:
         with self.connect() as connection:
+            normalized = self._normalize_transaction_payload(connection, user_id, payload)
             connection.execute(
-                'UPDATE transactions SET kind = :kind, amount = :amount, wallet = :wallet, category = :category, tags_json = :tags_json, notes = :notes, date_iso = :date_iso, recurring = :recurring WHERE id = :id AND user_id = :user_id',
-                {**payload, 'tags_json': json.dumps(payload['tags']), 'date_iso': payload['date'].isoformat(), 'recurring': 1 if payload['recurring'] else 0, 'id': item_id, 'user_id': user_id},
+                'UPDATE transactions SET kind = :kind, amount = :amount, wallet = :wallet, category = :category, fixed_income_source_id = :fixed_income_source_id, obligation_id = :obligation_id, tags_json = :tags_json, notes = :notes, date_iso = :date_iso, recurring = :recurring WHERE id = :id AND user_id = :user_id',
+                {**normalized, 'tags_json': json.dumps(normalized['tags']), 'date_iso': normalized['date'].isoformat(), 'recurring': 1 if normalized['recurring'] else 0, 'id': item_id, 'user_id': user_id},
             )
             row = connection.execute('SELECT * FROM transactions WHERE id = ? AND user_id = ?', (item_id, user_id)).fetchone()
         if row is None:
@@ -530,17 +539,65 @@ class Database:
         with self.connect() as connection:
             connection.execute('DELETE FROM tags WHERE user_id = ? AND id = ?', (user_id, tag_id))
 
-    @staticmethod
-    def _fixed_income(row: sqlite3.Row) -> FixedIncomeSource:
-        return FixedIncomeSource(id=row['id'], label=row['label'], amount=row['amount'], cadence=row['cadence'], expected_day=row['expected_day'], expected_weekday=row['expected_weekday'], wallet=row['wallet'], active=bool(row['active']))
+    def _current_period_totals(self, connection: sqlite3.Connection, user_id: int, column: str, kind: str) -> dict[int, float]:
+        start_iso, end_iso = self._current_period_bounds()
+        rows = connection.execute(
+            f'SELECT {column} AS linked_id, SUM(amount) AS total FROM transactions WHERE user_id = ? AND kind = ? AND {column} IS NOT NULL AND date_iso >= ? AND date_iso < ? GROUP BY {column}',
+            (user_id, kind, start_iso, end_iso),
+        ).fetchall()
+        return {int(row['linked_id']): float(row['total'] or 0) for row in rows}
 
     @staticmethod
-    def _obligation(row: sqlite3.Row) -> Obligation:
-        return Obligation(id=row['id'], label=row['label'], amount=row['amount'], category_id=row['category_id'], cadence=row['cadence'], due_day=row['due_day'], due_weekday=row['due_weekday'], kind=row['kind'], status=row['status'])
+    def _current_period_bounds() -> tuple[str, str]:
+        now = datetime.now()
+        start = datetime(now.year, now.month, 1)
+        next_month = datetime(now.year + (1 if now.month == 12 else 0), 1 if now.month == 12 else now.month + 1, 1)
+        return start.isoformat(), next_month.isoformat()
+
+    @staticmethod
+    def _period_status(recorded_amount: float, expected_amount: float) -> str:
+        if expected_amount <= 0:
+            return 'Cubierto'
+        if recorded_amount <= 0:
+            return 'Pendiente'
+        if recorded_amount >= expected_amount:
+            return 'Cubierto'
+        return 'Parcial'
+
+    def _normalize_transaction_payload(self, connection: sqlite3.Connection, user_id: int, payload: dict) -> dict:
+        normalized = dict(payload)
+        fixed_income_source_id = normalized.get('fixed_income_source_id')
+        obligation_id = normalized.get('obligation_id')
+        if fixed_income_source_id and obligation_id:
+            raise ValueError('Un movimiento no puede vincularse a ingreso fijo y obligacion al mismo tiempo.')
+        if fixed_income_source_id is not None:
+            if normalized['kind'] != 'ingreso':
+                raise ValueError('Solo un ingreso puede vincularse a un ingreso fijo.')
+            row = connection.execute('SELECT id FROM fixed_income_sources WHERE id = ? AND user_id = ? LIMIT 1', (fixed_income_source_id, user_id)).fetchone()
+            if row is None:
+                raise ValueError('Ingreso fijo no encontrado.')
+        if obligation_id is not None:
+            if normalized['kind'] != 'gasto':
+                raise ValueError('Solo un gasto puede vincularse a una obligacion.')
+            row = connection.execute('SELECT id FROM obligations WHERE id = ? AND user_id = ? LIMIT 1', (obligation_id, user_id)).fetchone()
+            if row is None:
+                raise ValueError('Obligacion no encontrada.')
+        return normalized
+
+    @staticmethod
+    def _fixed_income(row: sqlite3.Row, recorded_amount: float = 0) -> FixedIncomeSource:
+        expected_amount = float(row['amount']) * {'weekly': 4, 'biweekly': 2}.get(row['cadence'], 1)
+        settled_amount = min(max(recorded_amount, 0), expected_amount)
+        return FixedIncomeSource(id=row['id'], label=row['label'], amount=row['amount'], cadence=row['cadence'], expected_day=row['expected_day'], expected_weekday=row['expected_weekday'], wallet=row['wallet'], active=bool(row['active']), current_period_expected_amount=expected_amount, current_period_recorded_amount=settled_amount, current_period_balance=max(expected_amount - settled_amount, 0))
+
+    def _obligation(self, row: sqlite3.Row, recorded_amount: float = 0) -> Obligation:
+        expected_amount = float(row['amount']) * {'weekly': 4, 'biweekly': 2}.get(row['cadence'], 1)
+        settled_amount = min(max(recorded_amount, 0), expected_amount)
+        return Obligation(id=row['id'], label=row['label'], amount=row['amount'], category_id=row['category_id'], cadence=row['cadence'], due_day=row['due_day'], due_weekday=row['due_weekday'], kind=row['kind'], status=row['status'], current_period_expected_amount=expected_amount, current_period_recorded_amount=settled_amount, current_period_balance=max(expected_amount - settled_amount, 0), current_period_status=self._period_status(settled_amount, expected_amount))
 
     @staticmethod
     def _transaction(row: sqlite3.Row) -> Transaction:
-        return Transaction(id=row['id'], kind=row['kind'], amount=row['amount'], wallet=row['wallet'], category=row['category'], tags=json.loads(row['tags_json']), notes=row['notes'], date=datetime.fromisoformat(row['date_iso']), recurring=bool(row['recurring']))
+        return Transaction(id=row['id'], kind=row['kind'], amount=row['amount'], wallet=row['wallet'], category=row['category'], fixed_income_source_id=row['fixed_income_source_id'], obligation_id=row['obligation_id'], tags=json.loads(row['tags_json']), notes=row['notes'], date=datetime.fromisoformat(row['date_iso']), recurring=bool(row['recurring']))
 
     @staticmethod
     def _normalize_username(username: str) -> str:

@@ -60,6 +60,7 @@ import { currency, formatDateInput } from './utils'
 import { colorTokens, iconGlyph, iconTokens, slugify, tokenColor } from './visuals'
 
 type AppTab = 'dashboard' | 'transactions' | 'base' | 'settings'
+type LinkedSettlementMode = 'partial' | 'complete'
 
 const appTabs: Array<{ id: AppTab; label: string }> = [
   { id: 'dashboard', label: 'Resumen' },
@@ -124,6 +125,8 @@ const emptyTransaction = (wallet = 'Banco', category = ''): TransactionInput => 
   amount: 0,
   wallet,
   category,
+  fixed_income_source_id: null,
+  obligation_id: null,
   tags: [],
   notes: '',
   date: formatDateInput(new Date().toISOString()),
@@ -197,6 +200,13 @@ const transactionKindLabels: Record<TransactionKind, string> = {
 function deriveObligationKind(payload: ObligationInput, categories: CategoryConfig[]): ObligationInput {
   const category = categories.find((item) => item.id === payload.category_id)
   return { ...payload, kind: category?.type ?? payload.kind }
+}
+
+function categoryLabelById(categories: CategoryConfig[], categoryId: string | null | undefined): string {
+  if (!categoryId) {
+    return ''
+  }
+  return categories.find((item) => item.id === categoryId)?.label ?? ''
 }
 
 function resolveErrorMessage(error: unknown, fallback: string): string {
@@ -398,6 +408,7 @@ function App() {
   const [tagForm, setTagForm] = useState<TagConfigInput>(emptyTag())
   const [userForm, setUserForm] = useState<{ username: string; password: string; role: UserRole }>({ username: '', password: '', role: 'operator' })
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '' })
+  const [transactionSettlementMode, setTransactionSettlementMode] = useState<LinkedSettlementMode>('partial')
   const [editingTransactionId, setEditingTransactionId] = useState<number | null>(null)
   const [editingFixedIncomeId, setEditingFixedIncomeId] = useState<number | null>(null)
   const [editingObligationId, setEditingObligationId] = useState<number | null>(null)
@@ -647,6 +658,7 @@ function App() {
         await createTransaction(transactionForm)
       }
       setTransactionForm(emptyTransaction(defaultWallet, defaultIncomeCategory))
+      setTransactionSettlementMode('partial')
       setEditingTransactionId(null)
       await load()
     } catch (submitError) {
@@ -924,11 +936,14 @@ function App() {
           editingTransactionId={editingTransactionId}
           transactionForm={transactionForm}
           setTransactionForm={setTransactionForm}
+          transactionSettlementMode={transactionSettlementMode}
+          setTransactionSettlementMode={setTransactionSettlementMode}
           categoriesForTransactionKind={categoriesForTransactionKind}
           suggestion={suggestion}
           onSubmit={handleTransactionSubmit}
           onEdit={(transaction) => {
             setEditingTransactionId(transaction.id)
+            setTransactionSettlementMode('partial')
             setTransactionForm({ ...transaction, date: formatDateInput(transaction.date) })
           }}
           onDelete={async (id) => {
@@ -937,6 +952,7 @@ function App() {
           }}
           onCancelEdit={() => {
             setEditingTransactionId(null)
+            setTransactionSettlementMode('partial')
             setTransactionForm(emptyTransaction(defaultWallet, defaultIncomeCategory))
           }}
         />
@@ -957,11 +973,11 @@ function App() {
           onObligationSubmit={handleObligationSubmit}
           onEditFixedIncome={(item) => {
             setEditingFixedIncomeId(item.id)
-            setFixedIncomeForm({ ...item })
+            setFixedIncomeForm({ label: item.label, amount: item.amount, cadence: item.cadence, expected_day: item.expected_day, expected_weekday: item.expected_weekday, wallet: item.wallet, active: item.active })
           }}
           onEditObligation={(item) => {
             setEditingObligationId(item.id)
-            setObligationForm({ ...item })
+            setObligationForm({ label: item.label, amount: item.amount, category_id: item.category_id, cadence: item.cadence, due_day: item.due_day, due_weekday: item.due_weekday, kind: item.kind, status: item.status })
           }}
           onDeleteFixedIncome={async (id) => {
             await deleteFixedIncomeSource(id)
@@ -1181,6 +1197,8 @@ function TransactionsTab({
   editingTransactionId,
   transactionForm,
   setTransactionForm,
+  transactionSettlementMode,
+  setTransactionSettlementMode,
   categoriesForTransactionKind,
   suggestion,
   onSubmit,
@@ -1194,6 +1212,8 @@ function TransactionsTab({
   editingTransactionId: number | null
   transactionForm: TransactionInput
   setTransactionForm: Dispatch<SetStateAction<TransactionInput>>
+  transactionSettlementMode: LinkedSettlementMode
+  setTransactionSettlementMode: Dispatch<SetStateAction<LinkedSettlementMode>>
   categoriesForTransactionKind: CategoryConfig[]
   suggestion: AllocationSuggestion | null
   onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
@@ -1202,6 +1222,15 @@ function TransactionsTab({
   onCancelEdit: () => void
 }) {
   const tagsByLabel = new Map(data.tags.map((tag) => [tag.label, tag]))
+  const linkedIncomeOptions = data.fixed_income_sources.filter((item) => item.active)
+  const linkedObligationOptions = data.obligations
+  const selectedFixedIncome = linkedIncomeOptions.find((item) => item.id === transactionForm.fixed_income_source_id) ?? null
+  const selectedObligation = linkedObligationOptions.find((item) => item.id === transactionForm.obligation_id) ?? null
+  const selectedLinkedBalance = transactionForm.kind === 'ingreso'
+    ? selectedFixedIncome?.current_period_balance ?? 0
+    : transactionForm.kind === 'gasto'
+      ? selectedObligation?.current_period_balance ?? 0
+      : 0
 
   return (
     <section className="content-grid single-focus">
@@ -1219,12 +1248,84 @@ function TransactionsTab({
             <small>Tipo de movimiento</small>
             <div className="kind-chip-row">
               {(Object.keys(transactionKindLabels) as TransactionKind[]).map((kind) => (
-                <button key={kind} type="button" className={transactionForm.kind === kind ? 'kind-chip active' : 'kind-chip'} onClick={() => setTransactionForm((current) => ({ ...current, kind, category: '' }))}>
+                <button key={kind} type="button" className={transactionForm.kind === kind ? 'kind-chip active' : 'kind-chip'} onClick={() => {
+                  setTransactionSettlementMode('partial')
+                  setTransactionForm((current) => ({ ...current, kind, category: '', amount: 0, fixed_income_source_id: null, obligation_id: null }))
+                }}>
                   <strong>{transactionKindLabels[kind]}</strong>
                 </button>
               ))}
             </div>
           </div>
+          {transactionForm.kind === 'ingreso' ? (
+            <>
+              <label>
+                Ingreso fijo vinculado
+                <select value={transactionForm.fixed_income_source_id ?? ''} onChange={(event) => {
+                  const nextId = event.target.value ? Number(event.target.value) : null
+                  const linkedItem = linkedIncomeOptions.find((item) => item.id === nextId) ?? null
+                  setTransactionForm((current) => ({
+                    ...current,
+                    fixed_income_source_id: nextId,
+                    obligation_id: null,
+                    wallet: linkedItem?.wallet ?? current.wallet,
+                    category: linkedItem?.label ?? current.category,
+                    amount: transactionSettlementMode === 'complete' && linkedItem ? linkedItem.current_period_balance : current.amount,
+                  }))
+                }}>
+                  <option value="">Sin vincular</option>
+                  {linkedIncomeOptions.map((item) => <option key={item.id} value={item.id}>{`${item.label} · pendiente ${currency(item.current_period_balance)}`}</option>)}
+                </select>
+              </label>
+              <div className="span-2 form-kind-block">
+                <small>Aplicacion del ingreso</small>
+                <div className="settlement-mode-row">
+                  <button type="button" className={transactionSettlementMode === 'partial' ? 'tag active' : 'tag'} onClick={() => setTransactionSettlementMode('partial')}>Parcial</button>
+                  <button type="button" className={transactionSettlementMode === 'complete' ? 'tag active' : 'tag'} onClick={() => {
+                    setTransactionSettlementMode('complete')
+                    if (selectedFixedIncome) {
+                      setTransactionForm((current) => ({ ...current, amount: selectedFixedIncome.current_period_balance }))
+                    }
+                  }}>Completo</button>
+                </div>
+              </div>
+              {selectedFixedIncome ? <div className="span-2 banner subtle">Registrado este mes: {currency(selectedFixedIncome.current_period_recorded_amount)} · Pendiente: {currency(selectedFixedIncome.current_period_balance)} de {currency(selectedFixedIncome.current_period_expected_amount)}.</div> : null}
+            </>
+          ) : null}
+          {transactionForm.kind === 'gasto' ? (
+            <>
+              <label>
+                Gasto fijo vinculado
+                <select value={transactionForm.obligation_id ?? ''} onChange={(event) => {
+                  const nextId = event.target.value ? Number(event.target.value) : null
+                  const linkedItem = linkedObligationOptions.find((item) => item.id === nextId) ?? null
+                  setTransactionForm((current) => ({
+                    ...current,
+                    obligation_id: nextId,
+                    fixed_income_source_id: null,
+                    category: linkedItem ? categoryLabelById(data.categories, linkedItem.category_id) || current.category : current.category,
+                    amount: transactionSettlementMode === 'complete' && linkedItem ? linkedItem.current_period_balance : current.amount,
+                  }))
+                }}>
+                  <option value="">Sin vincular</option>
+                  {linkedObligationOptions.map((item) => <option key={item.id} value={item.id}>{`${item.label} · pendiente ${currency(item.current_period_balance)}`}</option>)}
+                </select>
+              </label>
+              <div className="span-2 form-kind-block">
+                <small>Aplicacion del gasto</small>
+                <div className="settlement-mode-row">
+                  <button type="button" className={transactionSettlementMode === 'partial' ? 'tag active' : 'tag'} onClick={() => setTransactionSettlementMode('partial')}>Parcial</button>
+                  <button type="button" className={transactionSettlementMode === 'complete' ? 'tag active' : 'tag'} onClick={() => {
+                    setTransactionSettlementMode('complete')
+                    if (selectedObligation) {
+                      setTransactionForm((current) => ({ ...current, amount: selectedObligation.current_period_balance }))
+                    }
+                  }}>Completo</button>
+                </div>
+              </div>
+              {selectedObligation ? <div className="span-2 banner subtle">Estado del periodo: {selectedObligation.current_period_status}. Registrado: {currency(selectedObligation.current_period_recorded_amount)} · Pendiente: {currency(selectedObligation.current_period_balance)} de {currency(selectedObligation.current_period_expected_amount)}.</div> : null}
+            </>
+          ) : null}
           <label>
             Monto
             <input type="number" min="0" step="0.01" value={transactionForm.amount || ''} onChange={(event) => setTransactionForm((current) => ({ ...current, amount: Number(event.target.value) }))} />
@@ -1265,7 +1366,7 @@ function TransactionsTab({
             Recurrente
           </label>
           <div className="span-2 action-row">
-            <button type="submit" disabled={saving || !canEditData}>{editingTransactionId ? 'Guardar cambios' : 'Registrar movimiento'}</button>
+            <button type="submit" disabled={saving || !canEditData || (transactionSettlementMode === 'complete' && !!(transactionForm.fixed_income_source_id || transactionForm.obligation_id) && selectedLinkedBalance <= 0)}>{editingTransactionId ? 'Guardar cambios' : 'Registrar movimiento'}</button>
             {editingTransactionId ? <button type="button" className="ghost" onClick={onCancelEdit}>Cancelar</button> : null}
           </div>
         </form>
@@ -1294,6 +1395,7 @@ function TransactionsTab({
                 <div>
                   <strong>{transaction.category}</strong>
                   <p>{transaction.kind} · {transaction.wallet} · {new Date(transaction.date).toLocaleString()}</p>
+                  {transaction.fixed_income_source_id || transaction.obligation_id ? <small>{transaction.fixed_income_source_id ? 'Vinculado a ingreso fijo' : 'Vinculado a gasto fijo'}</small> : null}
                   {transaction.tags.length > 0 ? (
                     <div className="history-tag-row">
                       {transaction.tags.map((label) => {

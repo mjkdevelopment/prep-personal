@@ -919,6 +919,12 @@ textarea {
   gap: 10px;
 }
 
+.settlement-mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .kind-chip-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
