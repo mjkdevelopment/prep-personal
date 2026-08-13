@@ -74,6 +74,7 @@ const helpSections: Array<{ title: string; items: string[] }> = [
     title: 'Resumen',
     items: [
       'Te da una lectura rapida del mes: gasto, cobertura y disponible sugerido.',
+      'Margen libre muestra el excedente del mes y Disponible hoy refleja solo lo ya ingresado.',
       'El grafico destaca en que categorias se esta yendo tu dinero.',
       'Insights resume senales utiles para decidir con mas criterio.',
     ],
@@ -1174,38 +1175,32 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
         </Panel>
       </section>
       <section className="bottom-grid">
-        <Panel title="Margen libre" subtitle="Lo que no quedo asignado a obligaciones, metas ni personal base.">
+        <Panel title="Margen libre" subtitle="Excedente del mes.">
           <div className="free-margin-grid">
             <div className="free-margin-card">
               <span className="metric-kicker">Margen estructural</span>
               <strong>{currency(data.dashboard.free_margin_target)}</strong>
-              <p>Excedente teorico del mes una vez apartados obligaciones reales, metas y el 30% personal.</p>
             </div>
             <div className="free-margin-card emphasis">
               <span className="metric-kicker">Disponible hoy</span>
               <strong>{currency(data.dashboard.free_margin_available_now)}</strong>
-              <p>Parte del margen libre que ya existe segun los ingresos registrados hasta este momento.</p>
             </div>
           </div>
         </Panel>
-        <Panel title="Decidir excedente" subtitle="Sugerencias para mover ese margen libre con intencion.">
+        <Panel title="Decidir excedente" subtitle="Elige destino.">
           <div className="decision-grid">
             <article className="decision-card recommended">
               <span className="metric-kicker">Prioridad sugerida</span>
               <strong>{freeMarginRecommendation}</strong>
-              <p>La sugerencia cambia segun cobertura pendiente y si tu meta de ahorro, inversion o deuda ya esta realmente alimentada.</p>
             </article>
             <article className="decision-card">
               <strong>Pasar a ahorro o inversion</strong>
-              <p>Conviene si quieres convertir excedente operativo en crecimiento o colchon de seguridad.</p>
             </article>
             <article className="decision-card">
               <strong>Abonar a deuda</strong>
-              <p>Mejora tu flujo futuro si tienes compromisos caros o quieres adelantar pagos antes del cierre.</p>
             </article>
             <article className="decision-card">
               <strong>Liberar a personal</strong>
-              <p>Tiene sentido cuando ya cubriste base y metas del mes y quieres usar una parte con libertad total.</p>
             </article>
           </div>
         </Panel>
