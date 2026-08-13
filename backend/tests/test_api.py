@@ -379,6 +379,24 @@ def test_hosted_warning_reports_owner_bootstrap_env_presence() -> None:
         database.db_path = str(Path(_temp_directory.name) / 'test_app.db')
 
 
+def test_owner_bootstrap_env_pair_not_required_when_owner_already_exists() -> None:
+    assert _temp_directory is not None
+    existing_owner_db = str(Path(_temp_directory.name) / 'existing_owner_env_pair.db')
+    previous_db_path = database.db_path
+    database.db_path = existing_owner_db
+    try:
+        database.initialize()
+        with database.connect() as connection:
+            theme_id = database._get_meta_value(connection, 'theme_id') or 'emerald_editorial'
+            database._insert_user(connection, 'owner-env', '1234', UserRole.owner, theme_id, False, None)
+
+        with patch.dict(os.environ, {'OWNER_BOOTSTRAP_USERNAME': 'owner-env-only'}, clear=False):
+            os.environ.pop('OWNER_BOOTSTRAP_PASSWORD', None)
+            assert database.auto_bootstrap_owner_from_env() is False
+    finally:
+        database.db_path = previous_db_path
+
+
 def test_bootstrap_admin_rejects_bad_code_on_clean_db() -> None:
     assert _temp_directory is not None
     second_db = str(Path(_temp_directory.name) / 'clean_second.db')

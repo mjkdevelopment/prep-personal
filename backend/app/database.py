@@ -100,17 +100,18 @@ class Database:
 
         if not raw_username and not raw_password:
             return False
-        if not raw_username or not raw_password:
-            raise RuntimeError('OWNER_BOOTSTRAP_USERNAME y OWNER_BOOTSTRAP_PASSWORD deben configurarse juntos.')
-
-        normalized_username = self._normalize_username(raw_username)
-        if len(raw_password) < 4:
-            raise RuntimeError('OWNER_BOOTSTRAP_PASSWORD debe tener al menos 4 caracteres.')
 
         with self.connect() as connection:
             owner_count = connection.execute("SELECT COUNT(*) AS total FROM users WHERE role = 'owner'").fetchone()['total']
             if owner_count > 0:
                 return False
+
+            if not raw_username or not raw_password:
+                raise RuntimeError('OWNER_BOOTSTRAP_USERNAME y OWNER_BOOTSTRAP_PASSWORD deben configurarse juntos.')
+
+            normalized_username = self._normalize_username(raw_username)
+            if len(raw_password) < 4:
+                raise RuntimeError('OWNER_BOOTSTRAP_PASSWORD debe tener al menos 4 caracteres.')
 
             existing_user = connection.execute('SELECT id FROM users WHERE username = ? LIMIT 1', (normalized_username,)).fetchone()
             if existing_user is not None:
