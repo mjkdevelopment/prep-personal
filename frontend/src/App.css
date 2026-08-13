@@ -921,22 +921,29 @@ textarea {
 
 .kind-chip-row {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 10px;
 }
 
 .kind-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
   border-radius: 20px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.82);
   padding: 12px 14px;
-  text-align: left;
+  text-align: center;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease, color 180ms ease;
 }
 
 .kind-chip strong,
 .kind-chip span {
   display: block;
+  width: 100%;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .kind-chip.active {
@@ -1565,7 +1572,7 @@ textarea {
   }
 
   .kind-chip-row {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .hero-meta {
