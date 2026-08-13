@@ -44,6 +44,7 @@ class UserRecord:
 class Database:
     def __init__(self, db_path: str | None = None) -> None:
         self.db_path = db_path or os.getenv('APP_DB_PATH', self._default_db_path())
+        self.startup_warning: str | None = None
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
     @property

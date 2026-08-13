@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import json
+import logging
 from pathlib import Path
 import sqlite3
 from tempfile import NamedTemporaryFile
@@ -18,12 +19,18 @@ from .services import FinancialSnapshot, build_bootstrap, suggest_income_allocat
 
 
 database = Database()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    database.startup_warning = None
     database.initialize()
-    database.auto_bootstrap_owner_from_env()
+    try:
+        database.auto_bootstrap_owner_from_env()
+    except RuntimeError as exc:
+        database.startup_warning = str(exc)
+        logger.exception('Owner bootstrap automatico omitido: %s', exc)
     yield
 
 
@@ -81,7 +88,7 @@ def healthcheck() -> dict[str, str]:
 def auth_status(x_session_token: str | None = Header(default=None)):
     user = database.get_session_user(x_session_token)
     admin_bootstrap_required = database.admin_bootstrap_required()
-    return AuthStatus(authenticated=user is not None, has_users=database.has_users(), admin_bootstrap_required=admin_bootstrap_required, admin_bootstrap_code_path=database.bootstrap_code_path if admin_bootstrap_required else None, setup_complete=user.setup_complete if user else False, username=user.username if user else None, role=user.role if user else None, can_edit_data=user.can_edit_data if user else False, can_manage_users=user.can_manage_users if user else False)
+    return AuthStatus(authenticated=user is not None, has_users=database.has_users(), admin_bootstrap_required=admin_bootstrap_required, admin_bootstrap_code_path=database.bootstrap_code_path if admin_bootstrap_required else None, owner_bootstrap_warning=database.startup_warning, setup_complete=user.setup_complete if user else False, username=user.username if user else None, role=user.role if user else None, can_edit_data=user.can_edit_data if user else False, can_manage_users=user.can_manage_users if user else False)
 
 
 @app.post('/api/auth/bootstrap-owner', response_model=LoginResponse)

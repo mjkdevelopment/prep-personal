@@ -159,6 +159,7 @@ export interface AuthStatus {
   has_users: boolean
   admin_bootstrap_required: boolean
   admin_bootstrap_code_path: string | null
+  owner_bootstrap_warning: string | null
   setup_complete: boolean
   username: string | null
   role: UserRole | null

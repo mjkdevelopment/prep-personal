@@ -243,6 +243,7 @@ class AuthStatus(BaseModel):
     has_users: bool
     admin_bootstrap_required: bool
     admin_bootstrap_code_path: Optional[str] = None
+    owner_bootstrap_warning: Optional[str] = None
     setup_complete: bool
     username: Optional[str] = None
     role: Optional[UserRole] = None

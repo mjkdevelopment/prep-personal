@@ -419,6 +419,7 @@ function App() {
       has_users: response?.has_users ?? true,
       admin_bootstrap_required: false,
       admin_bootstrap_code_path: null,
+      owner_bootstrap_warning: null,
       setup_complete: response?.setup_complete ?? true,
       username: response?.username ?? null,
       role: response?.role ?? null,
@@ -609,7 +610,7 @@ function App() {
     try {
       await changePassword(passwordForm.currentPassword, passwordForm.newPassword)
       clearSessionToken()
-      setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
+      setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, owner_bootstrap_warning: current?.owner_bootstrap_warning ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
       setData(null)
       setOwnerData(null)
       setPasswordForm({ currentPassword: '', newPassword: '' })
@@ -628,7 +629,7 @@ function App() {
     } catch {
       clearSessionToken()
     } finally {
-      setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
+      setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, owner_bootstrap_warning: current?.owner_bootstrap_warning ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
       setData(null)
       setOwnerData(null)
       setSaving(false)
@@ -1730,6 +1731,7 @@ function LoginGate({
             <BrandLogo className="brand-login-logo" />
           </div>
           {ownerMode ? <p className="login-bootstrap-copy login-mode-copy">Acceso owner independiente para administracion comercial.</p> : null}
+          {ownerMode && authStatus?.owner_bootstrap_warning ? <div className="banner error">{authStatus.owner_bootstrap_warning}</div> : null}
           {error ? <div className="banner error">{error}</div> : null}
           <form className="login-form" onSubmit={(event) => { event.preventDefault(); void onLogin(username, password, bootstrapCode) }}>
             <div className="login-fields">
