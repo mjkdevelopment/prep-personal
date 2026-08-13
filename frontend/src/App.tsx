@@ -69,6 +69,38 @@ const appTabs: Array<{ id: AppTab; label: string }> = [
   { id: 'settings', label: 'Ajustes' },
 ]
 
+const normalizeTagLabel = (value: string): string => value.trim().replace(/^#+/, '')
+
+const sameTagLabel = (left: string, right: string): boolean => normalizeTagLabel(left).toLowerCase() === normalizeTagLabel(right).toLowerCase()
+
+const findTagByLabel = (tags: TagConfig[], label: string): TagConfig | null => {
+  const normalized = normalizeTagLabel(label)
+  if (!normalized) {
+    return null
+  }
+
+  return tags.find((tag) => sameTagLabel(tag.label, normalized)) ?? null
+}
+
+const commandTagColor = (kind: TransactionKind): string => {
+  if (kind === 'ingreso') {
+    return 'emerald'
+  }
+  if (kind === 'gasto') {
+    return 'terracotta'
+  }
+  if (kind === 'inversion') {
+    return 'sky'
+  }
+  if (kind === 'deuda') {
+    return 'plum'
+  }
+  if (kind === 'ahorro') {
+    return 'sage'
+  }
+  return 'petrol'
+}
+
 const helpSections: Array<{ title: string; items: string[] }> = [
   {
     title: 'Resumen',
@@ -170,6 +202,15 @@ const emptyTag = (): TagConfigInput => ({
   label: '',
   color_token: 'sage',
   active: true,
+  command_enabled: false,
+  preset_transaction_kind: null,
+  preset_fixed_income_source_id: null,
+  preset_obligation_id: null,
+  preset_settlement_mode: null,
+  preset_amount: null,
+  preset_wallet: null,
+  preset_category: null,
+  preset_recurring: null,
 })
 
 const roleLabels: Record<UserRole, string> = {
@@ -407,6 +448,8 @@ function App() {
   const [obligationForm, setObligationForm] = useState<ObligationInput>(emptyObligation())
   const [categoryForm, setCategoryForm] = useState<CategoryConfigInput>(emptyCategory())
   const [tagForm, setTagForm] = useState<TagConfigInput>(emptyTag())
+  const [tagCommandInput, setTagCommandInput] = useState('')
+  const [saveAsCommandTag, setSaveAsCommandTag] = useState(false)
   const [userForm, setUserForm] = useState<{ username: string; password: string; role: UserRole }>({ username: '', password: '', role: 'operator' })
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '' })
   const [transactionSettlementMode, setTransactionSettlementMode] = useState<LinkedSettlementMode>('partial')
@@ -653,13 +696,43 @@ function App() {
     event.preventDefault()
     setSaving(true)
     try {
+      const normalizedCommandTag = normalizeTagLabel(tagCommandInput)
+      const existingCommandTag = data ? findTagByLabel(data.tags, normalizedCommandTag) : null
+      const payload: TransactionInput = normalizedCommandTag && !transactionForm.tags.some((item) => sameTagLabel(item, normalizedCommandTag))
+        ? { ...transactionForm, tags: [...transactionForm.tags, existingCommandTag?.label ?? normalizedCommandTag] }
+        : transactionForm
+
+      if (saveAsCommandTag) {
+        if (!normalizedCommandTag) {
+          throw new Error('Escribe el nombre del tag comando antes de guardarlo.')
+        }
+
+        await upsertTag({
+          id: existingCommandTag?.id ?? slugify(normalizedCommandTag),
+          label: existingCommandTag?.label ?? normalizedCommandTag,
+          color_token: existingCommandTag?.color_token ?? commandTagColor(payload.kind),
+          active: true,
+          command_enabled: true,
+          preset_transaction_kind: payload.kind,
+          preset_fixed_income_source_id: payload.kind === 'ingreso' ? payload.fixed_income_source_id : null,
+          preset_obligation_id: payload.kind === 'gasto' ? payload.obligation_id : null,
+          preset_settlement_mode: payload.kind === 'ingreso' || payload.kind === 'gasto' ? transactionSettlementMode : null,
+          preset_amount: payload.amount || null,
+          preset_wallet: payload.wallet || null,
+          preset_category: payload.category || null,
+          preset_recurring: payload.recurring,
+        })
+      }
+
       if (editingTransactionId) {
-        await updateTransaction(editingTransactionId, transactionForm)
+        await updateTransaction(editingTransactionId, payload)
       } else {
-        await createTransaction(transactionForm)
+        await createTransaction(payload)
       }
       setTransactionForm(emptyTransaction(defaultWallet, defaultIncomeCategory))
       setTransactionSettlementMode('partial')
+      setTagCommandInput('')
+      setSaveAsCommandTag(false)
       setEditingTransactionId(null)
       await load()
     } catch (submitError) {
@@ -945,6 +1018,9 @@ function App() {
           onEdit={(transaction) => {
             setEditingTransactionId(transaction.id)
             setTransactionSettlementMode('partial')
+            const presetTag = transaction.tags.map((label) => findTagByLabel(data.tags, label)).find((item) => item?.command_enabled) ?? null
+            setTagCommandInput(presetTag ? `#${presetTag.label}` : '')
+            setSaveAsCommandTag(Boolean(presetTag))
             setTransactionForm({ ...transaction, date: formatDateInput(transaction.date) })
           }}
           onDelete={async (id) => {
@@ -954,7 +1030,38 @@ function App() {
           onCancelEdit={() => {
             setEditingTransactionId(null)
             setTransactionSettlementMode('partial')
+            setTagCommandInput('')
+            setSaveAsCommandTag(false)
             setTransactionForm(emptyTransaction(defaultWallet, defaultIncomeCategory))
+          }}
+          tagCommandInput={tagCommandInput}
+          setTagCommandInput={setTagCommandInput}
+          saveAsCommandTag={saveAsCommandTag}
+          setSaveAsCommandTag={setSaveAsCommandTag}
+          onApplyCommandTag={(tag) => {
+            setTagCommandInput(`#${tag.label}`)
+            if (!tag.command_enabled) {
+              return
+            }
+
+            setTransactionSettlementMode(tag.preset_settlement_mode ?? 'partial')
+            setTransactionForm((current) => {
+              const nextKind = tag.preset_transaction_kind ?? current.kind
+              const nextTags = current.tags.some((item) => sameTagLabel(item, tag.label)) ? current.tags : [...current.tags, tag.label]
+
+              return {
+                ...current,
+                kind: nextKind,
+                amount: tag.preset_amount ?? current.amount,
+                wallet: tag.preset_wallet ?? current.wallet,
+                category: tag.preset_category ?? current.category,
+                fixed_income_source_id: nextKind === 'ingreso' ? (tag.preset_fixed_income_source_id ?? current.fixed_income_source_id) : null,
+                obligation_id: nextKind === 'gasto' ? (tag.preset_obligation_id ?? current.obligation_id) : null,
+                tags: nextTags,
+                date: formatDateInput(new Date().toISOString()),
+                recurring: tag.preset_recurring ?? current.recurring,
+              }
+            })
           }}
         />
       ) : null}
@@ -1243,6 +1350,11 @@ function TransactionsTab({
   onEdit,
   onDelete,
   onCancelEdit,
+  tagCommandInput,
+  setTagCommandInput,
+  saveAsCommandTag,
+  setSaveAsCommandTag,
+  onApplyCommandTag,
 }: {
   data: BootstrapResponse
   canEditData: boolean
@@ -1258,8 +1370,15 @@ function TransactionsTab({
   onEdit: (transaction: Transaction) => void
   onDelete: (id: number) => Promise<void>
   onCancelEdit: () => void
+  tagCommandInput: string
+  setTagCommandInput: Dispatch<SetStateAction<string>>
+  saveAsCommandTag: boolean
+  setSaveAsCommandTag: Dispatch<SetStateAction<boolean>>
+  onApplyCommandTag: (tag: TagConfig) => void
 }) {
+  const [historyTagFilter, setHistoryTagFilter] = useState('')
   const tagsByLabel = new Map(data.tags.map((tag) => [tag.label, tag]))
+  const activeTags = data.tags.filter((tag) => tag.active)
   const linkedIncomeOptions = data.fixed_income_sources.filter((item) => item.active)
   const linkedObligationOptions = data.obligations
   const selectedFixedIncome = linkedIncomeOptions.find((item) => item.id === transactionForm.fixed_income_source_id) ?? null
@@ -1269,6 +1388,11 @@ function TransactionsTab({
     : transactionForm.kind === 'gasto'
       ? selectedObligation?.current_period_balance ?? 0
       : 0
+  const filteredTransactions = historyTagFilter
+    ? data.transactions.filter((transaction) => transaction.tags.some((label) => sameTagLabel(label, historyTagFilter)))
+    : data.transactions
+  const filteredHistoryTotal = filteredTransactions.reduce((sum, transaction) => sum + transaction.amount, 0)
+  const matchedCommandTag = findTagByLabel(data.tags, tagCommandInput)
 
   return (
     <section className="content-grid single-focus">
@@ -1282,6 +1406,67 @@ function TransactionsTab({
           <small>{transactionForm.wallet || 'Banco'} · {transactionForm.category || 'Categoria pendiente'}</small>
         </div>
         <form className="form-grid dynamic-form" onSubmit={onSubmit}>
+          <label className="span-2">
+            Tag rapido
+            <input
+              list="transaction-tag-options"
+              value={tagCommandInput}
+              placeholder="#limpieza o #pedidosya"
+              onChange={(event) => {
+                const nextValue = event.target.value
+                setTagCommandInput(nextValue)
+                const matchedTag = findTagByLabel(data.tags, nextValue)
+                if (!matchedTag) {
+                  return
+                }
+
+                setTransactionForm((current) => ({
+                  ...current,
+                  tags: current.tags.some((item) => sameTagLabel(item, matchedTag.label)) ? current.tags : [...current.tags, matchedTag.label],
+                }))
+
+                if (matchedTag.command_enabled) {
+                  onApplyCommandTag(matchedTag)
+                }
+              }}
+            />
+            <datalist id="transaction-tag-options">
+              {activeTags.map((tag) => <option key={tag.id} value={`#${tag.label}`} />)}
+            </datalist>
+          </label>
+          <label className="span-2 checkbox-row tag-command-toggle">
+            <input type="checkbox" checked={saveAsCommandTag} onChange={(event) => setSaveAsCommandTag(event.target.checked)} /> Guardar este movimiento como tag comando
+          </label>
+          {matchedCommandTag?.command_enabled ? <div className="span-2 banner subtle">Preset listo: #{matchedCommandTag.label}</div> : null}
+          <div className="span-2 tag-wrap tag-wrap-top">
+            {activeTags.map((tag) => {
+              const selected = transactionForm.tags.some((item) => sameTagLabel(item, tag.label))
+              return (
+                <button
+                  key={tag.id}
+                  type="button"
+                  className={selected ? 'tag active' : 'tag'}
+                  onClick={() => {
+                    if (selected) {
+                      setTransactionForm((current) => ({ ...current, tags: current.tags.filter((item) => !sameTagLabel(item, tag.label)) }))
+                      if (sameTagLabel(tagCommandInput, tag.label)) {
+                        setTagCommandInput('')
+                      }
+                      return
+                    }
+
+                    setTagCommandInput(`#${tag.label}`)
+                    setTransactionForm((current) => ({ ...current, tags: [...current.tags, tag.label] }))
+                    if (tag.command_enabled) {
+                      onApplyCommandTag(tag)
+                    }
+                  }}
+                >
+                  #{tag.label}
+                </button>
+              )
+            })}
+          </div>
           <div className="span-2 form-kind-block">
             <small>Tipo de movimiento</small>
             <div className="kind-chip-row">
@@ -1389,16 +1574,6 @@ function TransactionsTab({
             Notas
             <textarea rows={3} value={transactionForm.notes} onChange={(event) => setTransactionForm((current) => ({ ...current, notes: event.target.value }))} />
           </label>
-          <div className="span-2 tag-wrap">
-            {data.tags.map((tag) => {
-              const selected = transactionForm.tags.includes(tag.label)
-              return (
-                <button key={tag.id} type="button" className={selected ? 'tag active' : 'tag'} onClick={() => setTransactionForm((current) => ({ ...current, tags: selected ? current.tags.filter((item) => item !== tag.label) : [...current.tags, tag.label] }))}>
-                  {tag.label}
-                </button>
-              )
-            })}
-          </div>
           <label className="span-2 checkbox-row">
             <input type="checkbox" checked={transactionForm.recurring} onChange={(event) => setTransactionForm((current) => ({ ...current, recurring: event.target.checked }))} />
             Recurrente
@@ -1420,8 +1595,19 @@ function TransactionsTab({
         ) : null}
       </Panel>
       <Panel title="Historial">
+        <div className="history-toolbar">
+          <div className="tag-wrap">
+            <button type="button" className={historyTagFilter ? 'tag' : 'tag active'} onClick={() => setHistoryTagFilter('')}>Todos</button>
+            {activeTags.map((tag) => (
+              <button key={tag.id} type="button" className={sameTagLabel(historyTagFilter, tag.label) ? 'tag active' : 'tag'} onClick={() => setHistoryTagFilter((current) => sameTagLabel(current, tag.label) ? '' : tag.label)}>
+                #{tag.label}
+              </button>
+            ))}
+          </div>
+          {historyTagFilter ? <div className="history-summary">#{historyTagFilter} · {filteredTransactions.length} mov. · {currency(filteredHistoryTotal)}</div> : null}
+        </div>
         <div className="list-stack">
-          {data.transactions.map((transaction) => (
+          {filteredTransactions.map((transaction) => (
             <article key={transaction.id} className="list-card" >
               <div className="list-leading list-leading-top">
                 {(() => {
@@ -1452,6 +1638,7 @@ function TransactionsTab({
               </div>
             </article>
           ))}
+          {filteredTransactions.length === 0 ? <div className="banner">No hay movimientos para el tag seleccionado.</div> : null}
         </div>
       </Panel>
     </section>

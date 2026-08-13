@@ -903,6 +903,10 @@ textarea {
   gap: 10px;
 }
 
+.tag-wrap-top {
+  margin-bottom: 4px;
+}
+
 .tag,
 .ghost,
 .action-row button,
@@ -1191,6 +1195,22 @@ textarea {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
+}
+
+.history-toolbar {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.history-summary {
+  color: var(--muted-strong);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.tag-command-toggle {
+  margin-top: -4px;
 }
 
 .history-tag {

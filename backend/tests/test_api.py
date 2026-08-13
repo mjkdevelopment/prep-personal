@@ -360,6 +360,44 @@ def test_category_and_tag_upsert_require_auth() -> None:
     assert tag_response.json()['label'] == 'Veterinaria'
 
 
+def test_tag_command_preset_roundtrip_in_bootstrap() -> None:
+    headers = ensure_app_headers('tagcommand', '1234')
+    create_tag = client.post(
+        '/api/tags',
+        json={
+            'id': 'limpieza',
+            'label': 'Limpieza',
+            'color_token': 'terracotta',
+            'active': True,
+            'command_enabled': True,
+            'preset_transaction_kind': 'gasto',
+            'preset_fixed_income_source_id': None,
+            'preset_obligation_id': 8,
+            'preset_settlement_mode': 'partial',
+            'preset_amount': 2000,
+            'preset_wallet': 'Efectivo',
+            'preset_category': 'Casa',
+            'preset_recurring': False,
+        },
+        headers=headers,
+    )
+
+    assert create_tag.status_code == 200
+    assert create_tag.json()['command_enabled'] is True
+    assert create_tag.json()['preset_obligation_id'] == 8
+
+    bootstrap = client.get('/api/bootstrap', headers=headers)
+    assert bootstrap.status_code == 200
+
+    tag = next(item for item in bootstrap.json()['tags'] if item['id'] == 'limpieza')
+    assert tag['label'] == 'Limpieza'
+    assert tag['preset_transaction_kind'] == 'gasto'
+    assert tag['preset_settlement_mode'] == 'partial'
+    assert tag['preset_amount'] == 2000
+    assert tag['preset_wallet'] == 'Efectivo'
+    assert tag['preset_category'] == 'Casa'
+
+
 def test_theme_preference_and_hard_deletes() -> None:
     headers = ensure_app_headers('themeuser', '1234')
     client.post('/api/categories', json={'id': 'ocio', 'label': 'Ocio', 'scope': 'expense', 'type': 'Variable', 'color_token': 'coral', 'icon_token': 'tv', 'active': True}, headers=headers)

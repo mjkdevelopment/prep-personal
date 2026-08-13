@@ -86,6 +86,15 @@ class Database:
             self._ensure_column(connection, 'users', 'created_by_user_id', 'INTEGER')
             self._ensure_user_scoped_categories_table(connection)
             self._ensure_user_scoped_tags_table(connection)
+            self._ensure_column(connection, 'tags', 'command_enabled', 'INTEGER NOT NULL DEFAULT 0')
+            self._ensure_column(connection, 'tags', 'preset_transaction_kind', 'TEXT')
+            self._ensure_column(connection, 'tags', 'preset_fixed_income_source_id', 'INTEGER')
+            self._ensure_column(connection, 'tags', 'preset_obligation_id', 'INTEGER')
+            self._ensure_column(connection, 'tags', 'preset_settlement_mode', 'TEXT')
+            self._ensure_column(connection, 'tags', 'preset_amount', 'REAL')
+            self._ensure_column(connection, 'tags', 'preset_wallet', 'TEXT')
+            self._ensure_column(connection, 'tags', 'preset_category', 'TEXT')
+            self._ensure_column(connection, 'tags', 'preset_recurring', 'INTEGER')
             connection.execute("UPDATE users SET role = CASE WHEN is_admin = 1 THEN 'owner' ELSE 'operator' END WHERE role IS NULL OR role = '' OR role NOT IN ('owner', 'admin', 'operator', 'viewer')")
             connection.execute("UPDATE users SET is_admin = CASE WHEN role = 'owner' THEN 1 ELSE 0 END")
             connection.execute('UPDATE users SET active = 1 WHERE active IS NULL')
@@ -509,8 +518,8 @@ class Database:
     def list_tags(self, user_id: int) -> list[TagConfig]:
         with self.connect() as connection:
             self._ensure_default_catalogs(connection, user_id)
-            rows = connection.execute('SELECT id, label, color_token, active FROM tags WHERE user_id = ? ORDER BY label ASC', (user_id,)).fetchall()
-        return [TagConfig(id=row['id'], label=row['label'], color_token=row['color_token'], active=bool(row['active'])) for row in rows]
+            rows = connection.execute('SELECT * FROM tags WHERE user_id = ? ORDER BY label ASC', (user_id,)).fetchall()
+        return [self._tag(row) for row in rows]
 
     def upsert_category(self, user_id: int, payload: dict) -> CategoryConfig:
         with self.connect() as connection:
@@ -524,11 +533,17 @@ class Database:
     def upsert_tag(self, user_id: int, payload: dict) -> TagConfig:
         with self.connect() as connection:
             connection.execute(
-                'INSERT INTO tags(user_id, id, label, color_token, active) VALUES(:user_id, :id, :label, :color_token, :active) ON CONFLICT(user_id, id) DO UPDATE SET label = excluded.label, color_token = excluded.color_token, active = excluded.active',
-                {**payload, 'user_id': user_id, 'active': 1 if payload['active'] else 0},
+                'INSERT INTO tags(user_id, id, label, color_token, active, command_enabled, preset_transaction_kind, preset_fixed_income_source_id, preset_obligation_id, preset_settlement_mode, preset_amount, preset_wallet, preset_category, preset_recurring) VALUES(:user_id, :id, :label, :color_token, :active, :command_enabled, :preset_transaction_kind, :preset_fixed_income_source_id, :preset_obligation_id, :preset_settlement_mode, :preset_amount, :preset_wallet, :preset_category, :preset_recurring) ON CONFLICT(user_id, id) DO UPDATE SET label = excluded.label, color_token = excluded.color_token, active = excluded.active, command_enabled = excluded.command_enabled, preset_transaction_kind = excluded.preset_transaction_kind, preset_fixed_income_source_id = excluded.preset_fixed_income_source_id, preset_obligation_id = excluded.preset_obligation_id, preset_settlement_mode = excluded.preset_settlement_mode, preset_amount = excluded.preset_amount, preset_wallet = excluded.preset_wallet, preset_category = excluded.preset_category, preset_recurring = excluded.preset_recurring',
+                {
+                    **payload,
+                    'user_id': user_id,
+                    'active': 1 if payload['active'] else 0,
+                    'command_enabled': 1 if payload.get('command_enabled') else 0,
+                    'preset_recurring': None if payload.get('preset_recurring') is None else (1 if payload.get('preset_recurring') else 0),
+                },
             )
-            row = connection.execute('SELECT id, label, color_token, active FROM tags WHERE user_id = ? AND id = ?', (user_id, payload['id'])).fetchone()
-        return TagConfig(id=row['id'], label=row['label'], color_token=row['color_token'], active=bool(row['active']))
+            row = connection.execute('SELECT * FROM tags WHERE user_id = ? AND id = ?', (user_id, payload['id'])).fetchone()
+        return self._tag(row)
 
     def delete_category(self, user_id: int, category_id: str) -> None:
         with self.connect() as connection:
@@ -598,6 +613,24 @@ class Database:
     @staticmethod
     def _transaction(row: sqlite3.Row) -> Transaction:
         return Transaction(id=row['id'], kind=row['kind'], amount=row['amount'], wallet=row['wallet'], category=row['category'], fixed_income_source_id=row['fixed_income_source_id'], obligation_id=row['obligation_id'], tags=json.loads(row['tags_json']), notes=row['notes'], date=datetime.fromisoformat(row['date_iso']), recurring=bool(row['recurring']))
+
+    @staticmethod
+    def _tag(row: sqlite3.Row) -> TagConfig:
+        return TagConfig(
+            id=row['id'],
+            label=row['label'],
+            color_token=row['color_token'],
+            active=bool(row['active']),
+            command_enabled=bool(row['command_enabled']),
+            preset_transaction_kind=row['preset_transaction_kind'],
+            preset_fixed_income_source_id=row['preset_fixed_income_source_id'],
+            preset_obligation_id=row['preset_obligation_id'],
+            preset_settlement_mode=row['preset_settlement_mode'],
+            preset_amount=row['preset_amount'],
+            preset_wallet=row['preset_wallet'],
+            preset_category=row['preset_category'],
+            preset_recurring=None if row['preset_recurring'] is None else bool(row['preset_recurring']),
+        )
 
     @staticmethod
     def _normalize_username(username: str) -> str:

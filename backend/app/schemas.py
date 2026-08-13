@@ -114,6 +114,15 @@ class TagConfig(BaseModel):
     label: str
     color_token: str
     active: bool = True
+    command_enabled: bool = False
+    preset_transaction_kind: Optional[TransactionKind] = None
+    preset_fixed_income_source_id: Optional[int] = None
+    preset_obligation_id: Optional[int] = None
+    preset_settlement_mode: Optional[str] = None
+    preset_amount: Optional[float] = None
+    preset_wallet: Optional[str] = None
+    preset_category: Optional[str] = None
+    preset_recurring: Optional[bool] = None
 
 
 class CategoryConfigInput(BaseModel):
@@ -131,6 +140,15 @@ class TagConfigInput(BaseModel):
     label: str = Field(min_length=1)
     color_token: str = Field(min_length=1)
     active: bool = True
+    command_enabled: bool = False
+    preset_transaction_kind: Optional[TransactionKind] = None
+    preset_fixed_income_source_id: Optional[int] = None
+    preset_obligation_id: Optional[int] = None
+    preset_settlement_mode: Optional[str] = None
+    preset_amount: Optional[float] = None
+    preset_wallet: Optional[str] = None
+    preset_category: Optional[str] = None
+    preset_recurring: Optional[bool] = None
 
 
 class AllocationSuggestion(BaseModel):

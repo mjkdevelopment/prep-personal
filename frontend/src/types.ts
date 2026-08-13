@@ -62,6 +62,15 @@ export interface TagConfig {
   label: string
   color_token: string
   active: boolean
+  command_enabled: boolean
+  preset_transaction_kind: TransactionKind | null
+  preset_fixed_income_source_id: number | null
+  preset_obligation_id: number | null
+  preset_settlement_mode: 'partial' | 'complete' | null
+  preset_amount: number | null
+  preset_wallet: string | null
+  preset_category: string | null
+  preset_recurring: boolean | null
 }
 
 export type CategoryConfigInput = CategoryConfig

@@ -136,6 +136,15 @@ def _decode_tag_configs(raw_value: str | None) -> list[dict[str, object]]:
             'label': str(item['label']),
             'color_token': str(item.get('colorToken') or 'gold'),
             'active': 1 if item.get('active', True) else 0,
+            'command_enabled': 1 if item.get('commandEnabled', False) else 0,
+            'preset_transaction_kind': item.get('presetTransactionKind'),
+            'preset_fixed_income_source_id': item.get('presetFixedIncomeSourceId'),
+            'preset_obligation_id': item.get('presetObligationId'),
+            'preset_settlement_mode': item.get('presetSettlementMode'),
+            'preset_amount': item.get('presetAmount'),
+            'preset_wallet': item.get('presetWallet'),
+            'preset_category': item.get('presetCategory'),
+            'preset_recurring': None if item.get('presetRecurring') is None else (1 if item.get('presetRecurring') else 0),
         }
         for item in items
         if isinstance(item, dict) and item.get('id') and item.get('label')
