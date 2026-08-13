@@ -67,7 +67,7 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     goals_target = fixed_income_expected * 0.20
     goals_reserved = sum(item.amount for item in transactions if item.kind in {'ahorro', 'inversion', 'deuda'})
     personal_target = fixed_income_expected * 0.30
-    personal_spent_this_month = sum(item.amount for item in transactions if item.kind == 'gasto' and item.date.year == now.year and item.date.month == now.month)
+    personal_spent_this_month = sum(item.amount for item in transactions if item.kind == 'gasto' and item.obligation_id is None and item.date.year == now.year and item.date.month == now.month)
     total_expenses_this_month = sum(item.amount for item in transactions if _affects_cash_negatively(item.kind) and item.date.year == now.year and item.date.month == now.month)
     snapshot = FinancialSnapshot(fixed_income_expected=fixed_income_expected, income_reported=income_reported_this_month, pending_obligations=pending_obligations_total)
     latest_income_amount = next((item.amount for item in transactions if _is_income(item.kind)), 0)
@@ -151,7 +151,7 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
         wallet_balances=[WalletBalanceView(label=wallet, amount=_round(sum(item.amount if _is_income(item.kind) else (-item.amount if _affects_cash_negatively(item.kind) else 0) for item in transactions if item.wallet == wallet))) for wallet in DEFAULT_WALLETS],
         bucket_overviews=[
             BucketOverview(label='Obligaciones fijas', reserved=_round(obligations_reserved), total=_round(obligations_target)),
-            BucketOverview(label='Personal', reserved=_round(max(total_expenses_this_month - goals_reserved, 0)), total=_round(fixed_income_expected * 0.30)),
+            BucketOverview(label='Personal', reserved=_round(personal_spent_this_month), total=_round(fixed_income_expected * 0.30)),
             BucketOverview(label='Ahorro, inversion y deuda', reserved=_round(goals_reserved), total=_round(goals_target)),
         ],
         expense_comparisons=[CategorySpendComparison(label=label, color_token=category_by_label.get(label).color_token if label in category_by_label else 'gold', icon_token=category_by_label.get(label).icon_token if label in category_by_label else 'receipt', current_amount=_round(current_category_totals.get(label, 0)), previous_amount=_round(previous_category_totals.get(label, 0))) for label in labels[:5]],

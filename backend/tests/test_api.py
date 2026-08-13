@@ -338,6 +338,14 @@ def test_linked_transactions_update_current_period_progress() -> None:
     assert obligation['current_period_recorded_amount'] == 500
     assert obligation['current_period_balance'] == 300
     assert obligation['current_period_status'] == 'Parcial'
+
+    dashboard = refreshed_payload['dashboard']
+    personal_bucket = next(item for item in dashboard['bucket_overviews'] if item['label'] == 'Personal')
+
+    assert dashboard['current_month_expense_total'] == 500
+    assert dashboard['personal_spent_this_month'] == 0
+    assert dashboard['remaining_personal_recommended_this_month'] == 108
+    assert personal_bucket['reserved'] == 0
     assert refreshed_payload['dashboard']['quincena_coverage'] == 0.625
 
 
