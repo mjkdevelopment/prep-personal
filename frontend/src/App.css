@@ -1109,6 +1109,49 @@ textarea {
   gap: 10px;
 }
 
+.free-margin-grid,
+.decision-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.free-margin-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.decision-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.free-margin-card,
+.decision-card {
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, white 22%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), color-mix(in srgb, var(--paper) 92%, white 8%));
+}
+
+.free-margin-card strong,
+.decision-card strong {
+  display: block;
+  margin: 10px 0 8px;
+}
+
+.free-margin-card strong {
+  font-size: 1.45rem;
+}
+
+.free-margin-card p,
+.decision-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.free-margin-card.emphasis,
+.decision-card.recommended {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 14%, white 86%), color-mix(in srgb, var(--paper) 92%, white 8%));
+}
+
 .list-card {
   padding: 16px 18px;
   display: flex;
@@ -1580,6 +1623,11 @@ textarea {
 
   .kind-chip-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .free-margin-grid,
+  .decision-grid {
+    grid-template-columns: 1fr;
   }
 
   .list-card {

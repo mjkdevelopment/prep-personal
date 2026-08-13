@@ -66,6 +66,7 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     obligations_reserved = sum(item.current_period_recorded_amount for item in obligations)
     goals_target = fixed_income_expected * 0.20
     goals_reserved = sum(item.amount for item in transactions if item.kind in {'ahorro', 'inversion', 'deuda'})
+    personal_target = fixed_income_expected * 0.30
     personal_spent_this_month = sum(item.amount for item in transactions if item.kind == 'gasto' and item.date.year == now.year and item.date.month == now.month)
     total_expenses_this_month = sum(item.amount for item in transactions if _affects_cash_negatively(item.kind) and item.date.year == now.year and item.date.month == now.month)
     snapshot = FinancialSnapshot(fixed_income_expected=fixed_income_expected, income_reported=income_reported_this_month, pending_obligations=pending_obligations_total)
@@ -74,6 +75,8 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     recommended_personal_budget_this_month = suggest_income_allocation(income_reported_this_month, snapshot).for_personal
     remaining_personal_recommended_this_month = max(recommended_personal_budget_this_month - personal_spent_this_month, 0)
     income_gap = max(fixed_income_expected - income_reported_this_month, 0)
+    free_margin_target = max(fixed_income_expected - obligations_target - goals_target - personal_target, 0)
+    free_margin_available_now = max(income_reported_this_month - obligations_target - goals_target - personal_target, 0)
     quincena_coverage = 1 if obligations_target == 0 else max(0, min(obligations_reserved / obligations_target, 1))
     current_month_expense_total = sum(item.amount for item in transactions if item.kind == 'gasto' and item.date.year == now.year and item.date.month == now.month)
     previous_month_expense_total = sum(item.amount for item in transactions if item.kind == 'gasto' and item.date.year == datetime(now.year, now.month - 1, 1).year and item.date.month == datetime(now.year, now.month - 1, 1).month)
@@ -122,6 +125,8 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
         safe_personal_available=_round(remaining_personal_recommended_this_month),
         fixed_income_expected=_round(fixed_income_expected),
         income_reported_this_month=_round(income_reported_this_month),
+        free_margin_target=_round(free_margin_target),
+        free_margin_available_now=_round(free_margin_available_now),
         current_month_expense_total=_round(current_month_expense_total),
         previous_month_expense_total=_round(previous_month_expense_total),
         monthly_fixed_outflow_total=_round(monthly_fixed_outflow_total),

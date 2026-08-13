@@ -108,6 +108,8 @@ export interface DashboardSummary {
   safe_personal_available: number
   fixed_income_expected: number
   income_reported_this_month: number
+  free_margin_target: number
+  free_margin_available_now: number
   current_month_expense_total: number
   previous_month_expense_total: number
   monthly_fixed_outflow_total: number

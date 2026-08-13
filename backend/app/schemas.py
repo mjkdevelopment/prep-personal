@@ -174,6 +174,8 @@ class DashboardSummary(BaseModel):
     safe_personal_available: float
     fixed_income_expected: float
     income_reported_this_month: float
+    free_margin_target: float
+    free_margin_available_now: float
     current_month_expense_total: float
     previous_month_expense_total: float
     monthly_fixed_outflow_total: float

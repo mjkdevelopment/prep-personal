@@ -245,6 +245,8 @@ def test_dashboard_monthly_expected_converts_weekly_and_biweekly_amounts() -> No
     assert payload['dashboard']['fixed_income_expected'] == 54000
     assert payload['dashboard']['monthly_fixed_outflow_total'] == 20000
     assert payload['dashboard']['reserve_per_quincena'] == 10000
+    assert payload['dashboard']['free_margin_target'] == 7000
+    assert payload['dashboard']['free_margin_available_now'] == 0
     assert payload['dashboard']['quincena_reserve_views'][1]['amount'] == 10000
     assert payload['dashboard']['quincena_reserve_views'][2]['amount'] == 10000
 
