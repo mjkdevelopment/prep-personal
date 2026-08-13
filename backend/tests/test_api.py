@@ -8,6 +8,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from backend.app.main import app, database
+from backend.app.main import _require_existing_db
 from backend.app.schemas import UserRole
 
 
@@ -459,3 +460,20 @@ def test_default_db_path_prefers_data_mount_when_present() -> None:
             assert database._default_db_path() == '/data/gride_ledger.db'
     finally:
         os.environ.update(railway_env)
+
+
+def test_require_existing_db_raises_for_missing_file_when_enabled() -> None:
+    original = os.environ.get('REQUIRE_EXISTING_DB')
+    try:
+        os.environ['REQUIRE_EXISTING_DB'] = '1'
+        missing_path = str(Path(_temp_directory.name if _temp_directory is not None else '.') / 'missing-production.db')
+        try:
+            _require_existing_db(missing_path)
+            assert False, 'Expected runtime error for missing required database file.'
+        except RuntimeError as exc:
+            assert 'missing-production.db' in str(exc)
+    finally:
+        if original is None:
+            os.environ.pop('REQUIRE_EXISTING_DB', None)
+        else:
+            os.environ['REQUIRE_EXISTING_DB'] = original

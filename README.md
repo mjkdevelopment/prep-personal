@@ -67,6 +67,7 @@ npm run build
 	- `OWNER_BOOTSTRAP_USERNAME=<tu usuario owner inicial>`
 	- `OWNER_BOOTSTRAP_PASSWORD=<tu contrasena owner inicial>`
 	- `OWNER_BOOTSTRAP_THEME_ID=emerald_editorial` opcional
+	- `REQUIRE_EXISTING_DB=1` opcional despues del primer deploy estable, para impedir que el servicio arranque sobre una base nueva o un volumen vacio por error
 5. El primer arranque creara automaticamente la cuenta owner solo si todavia no existe una cuenta owner en la base.
 6. El build instalara dependencias del frontend, generara `frontend/dist`, instalara el backend Python y publicara FastAPI en el puerto asignado.
 7. La SPA y la API quedaran servidas desde el mismo contenedor.
@@ -76,6 +77,7 @@ npm run build
 - El bootstrap por variables de entorno ocurre una sola vez: cuando no existe ningun usuario `owner`.
 - Si luego haces redeploy con las mismas variables, la app no recrea ni pisa la cuenta owner.
 - Si `OWNER_BOOTSTRAP_USERNAME` coincide con un usuario existente, el arranque fallara para obligar a corregir la configuracion.
+- Si activas `REQUIRE_EXISTING_DB=1`, el servicio fallara al arrancar cuando no exista `APP_DB_PATH`; esto evita que Railway levante una instalacion nueva en silencio sobre un volumen vacio o incorrecto.
 - Despues del primer deploy estable, conviene borrar `OWNER_BOOTSTRAP_PASSWORD` de Railway o rotarla desde el propio panel owner.
 
 Puedes partir de este archivo de ejemplo: `.env.railway.example`.

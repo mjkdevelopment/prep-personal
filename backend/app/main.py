@@ -23,11 +23,28 @@ database = Database()
 logger = logging.getLogger(__name__)
 
 
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _require_existing_db(database_path: str) -> None:
+    if not _env_flag('REQUIRE_EXISTING_DB'):
+        return
+    db_file = Path(database_path)
+    if db_file.exists():
+        return
+    raise RuntimeError(
+        f'REQUIRE_EXISTING_DB=1 impidio iniciar porque la base esperada no existe: {database_path}. '
+        'Esto suele indicar un volumen persistente nuevo, vacio o mal montado en Railway.'
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     database.startup_warning = None
     db_file = Path(database.db_path)
     existed_before_startup = db_file.exists()
+    _require_existing_db(database.db_path)
     database.initialize()
     try:
         database.auto_bootstrap_owner_from_env()
