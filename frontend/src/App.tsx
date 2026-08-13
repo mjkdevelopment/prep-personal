@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type Dispatch, type FormEvent, type React
 import './App.css'
 import {
   bootstrapOwner,
-  bootstrapAdmin,
   changePassword,
   clearSessionToken,
   completeInitialSetup,
@@ -206,8 +205,36 @@ function resolveErrorMessage(error: unknown, fallback: string): string {
   }
 
   try {
-    const parsed = JSON.parse(error.message) as { detail?: string }
-    return parsed.detail ?? fallback
+    const parsed = JSON.parse(error.message) as { detail?: unknown }
+    if (typeof parsed.detail === 'string' && parsed.detail.trim().length > 0) {
+      return parsed.detail
+    }
+    if (Array.isArray(parsed.detail)) {
+      const messages = parsed.detail
+        .map((item) => {
+          if (typeof item === 'string') {
+            return item
+          }
+          if (item && typeof item === 'object') {
+            const detail = item as { msg?: unknown; loc?: unknown }
+            const message = typeof detail.msg === 'string' ? detail.msg : null
+            const location = Array.isArray(detail.loc) ? detail.loc.join(' > ') : null
+            if (message && location) {
+              return `${location}: ${message}`
+            }
+            return message
+          }
+          return null
+        })
+        .filter((item): item is string => Boolean(item && item.trim().length > 0))
+      if (messages.length > 0) {
+        return messages.join(' | ')
+      }
+    }
+    if (typeof error.message === 'string' && error.message.trim().length > 0) {
+      return error.message
+    }
+    return fallback
   } catch {
     return error.message || fallback
   }
@@ -742,9 +769,7 @@ function App() {
               ? authStatus?.admin_bootstrap_required
                 ? await bootstrapOwner(username, password, bootstrapCode ?? '', deviceName)
                 : await loginOwner(username, password, deviceName)
-              : authStatus?.admin_bootstrap_required
-                ? await bootstrapAdmin(username, password, bootstrapCode ?? '', deviceName)
-                : await login(username, password, deviceName)
+              : await login(username, password, deviceName)
             await refreshAfterAuth(response)
           } catch (loginError) {
             setAuthError(resolveErrorMessage(loginError, 'No se pudo iniciar sesion.'))
