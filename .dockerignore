@@ -9,3 +9,17 @@ frontend/dist
 web
 gride-ledger-debug.apk
 .pytest_cache
+backend/data
+backend/tests
+deploy
+docs
+Gride_Ledger_Brand_Assets_v2
+Gride_Ledger_Brand_Assets_v2.zip
+lib
+test
+*.iml
+*.html
+README.md
+analysis_options.yaml
+pubspec.yaml
+pubspec.lock
