@@ -1290,11 +1290,29 @@ textarea {
 .picker-chip {
   display: grid;
   gap: 8px;
-  justify-items: start;
+  justify-items: center;
+  text-align: center;
 }
 
 .picker-chip span {
   font-size: 1.1rem;
+}
+
+.picker-chip small {
+  display: -webkit-box;
+  width: 100%;
+  line-height: 1.12;
+  overflow: hidden;
+  text-align: center;
+  text-wrap: balance;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.icon-picker .picker-chip {
+  align-content: start;
+  min-height: 84px;
 }
 
 .pie-chart {

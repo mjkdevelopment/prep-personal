@@ -241,6 +241,9 @@ class AppVisuals {
     'account_balance',
     'paid',
     'apartment',
+    'credit_card',
+    'movie',
+    'health',
   ];
 
   static Color colorFromToken(String token) {
@@ -278,6 +281,9 @@ class AppVisuals {
       'account_balance' => Icons.account_balance_rounded,
       'paid' => Icons.paid_rounded,
       'apartment' => Icons.apartment_rounded,
+      'credit_card' => Icons.credit_card_rounded,
+      'movie' => Icons.movie_rounded,
+      'health' => Icons.health_and_safety_rounded,
       _ => Icons.category_rounded,
     };
   }

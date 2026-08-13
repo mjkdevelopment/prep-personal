@@ -57,7 +57,7 @@ import type {
   UserRole,
 } from './types'
 import { currency, formatDateInput } from './utils'
-import { colorTokens, iconGlyph, iconTokens, slugify, tokenColor } from './visuals'
+import { colorTokens, iconGlyph, iconLabel, iconTokens, slugify, tokenColor } from './visuals'
 
 type AppTab = 'dashboard' | 'transactions' | 'base' | 'settings'
 type LinkedSettlementMode = 'partial' | 'complete'
@@ -1776,7 +1776,7 @@ function SettingsTab({
               {iconTokens.map((token) => (
                 <button key={token} type="button" className={categoryForm.icon_token === token ? 'picker-chip active' : 'picker-chip'} onClick={() => setCategoryForm((current) => ({ ...current, icon_token: token }))}>
                   <span>{iconGlyph(token)}</span>
-                  <small>{token}</small>
+                  <small>{iconLabel(token)}</small>
                 </button>
               ))}
             </div>
