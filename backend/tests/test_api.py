@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import app, database
 from backend.app.main import _require_existing_db
+from backend.app.main import _manual_owner_bootstrap_enabled
 from backend.app.schemas import UserRole
 
 
@@ -329,6 +330,17 @@ def test_first_run_requires_bootstrap_code() -> None:
     first_run_db = str(Path(_temp_directory.name) / 'first_run_only.db')
     database.db_path = first_run_db
     database.initialize()
+
+
+def test_manual_owner_bootstrap_disabled_in_hosted_environment_by_default() -> None:
+    with patch.dict(os.environ, {'RAILWAY_ENVIRONMENT': 'production'}, clear=False):
+        assert _manual_owner_bootstrap_enabled() is False
+
+
+def test_bootstrap_owner_rejected_when_manual_bootstrap_disabled() -> None:
+    with patch.dict(os.environ, {'RAILWAY_ENVIRONMENT': 'production'}, clear=False):
+        response = client.post('/api/auth/bootstrap-owner', json={'username': 'owner', 'password': '1234', 'bootstrap_code': 'ignored-code', 'device_name': 'pytest'})
+    assert response.status_code == 403
 
     response = client.get('/api/auth/status')
     assert response.status_code == 200

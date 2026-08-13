@@ -525,6 +525,7 @@ function App() {
       authenticated: true,
       has_users: response?.has_users ?? true,
       admin_bootstrap_required: false,
+      owner_bootstrap_enabled: false,
       admin_bootstrap_code_path: null,
       owner_bootstrap_warning: null,
       setup_complete: response?.setup_complete ?? true,
@@ -720,7 +721,7 @@ function App() {
       if (!isOwnerRoute) {
         navigate('/login', 'replace')
       }
-      setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, owner_bootstrap_warning: current?.owner_bootstrap_warning ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
+      setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, owner_bootstrap_enabled: current?.owner_bootstrap_enabled ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, owner_bootstrap_warning: current?.owner_bootstrap_warning ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
       setData(null)
       setOwnerData(null)
       setPasswordForm({ currentPassword: '', newPassword: '' })
@@ -742,7 +743,7 @@ function App() {
       if (!isOwnerRoute) {
         navigate('/login', 'replace')
       }
-      setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, owner_bootstrap_warning: current?.owner_bootstrap_warning ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
+      setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, owner_bootstrap_enabled: current?.owner_bootstrap_enabled ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, owner_bootstrap_warning: current?.owner_bootstrap_warning ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
       setData(null)
       setOwnerData(null)
       setSaving(false)
@@ -1825,7 +1826,8 @@ function LoginGate({
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [bootstrapCode, setBootstrapCode] = useState('')
-  const showBootstrap = ownerMode ? Boolean(authStatus?.admin_bootstrap_required) : false
+  const manualBootstrapEnabled = ownerMode ? Boolean(authStatus?.owner_bootstrap_enabled) : false
+  const showBootstrap = ownerMode ? Boolean(authStatus?.admin_bootstrap_required && authStatus?.owner_bootstrap_enabled) : false
 
   return (
     <main className="login-shell">
@@ -1861,6 +1863,7 @@ function LoginGate({
                 </label>
               ) : null}
             </div>
+            {ownerMode && !manualBootstrapEnabled && authStatus?.owner_bootstrap_warning ? <p className="login-bootstrap-copy">La cuenta owner inicial se crea solo desde variables seguras del servidor. El formulario manual no esta disponible en produccion.</p> : null}
             {showBootstrap ? <p className="login-bootstrap-copy">Codigo inicial: {authStatus?.admin_bootstrap_code_path ?? 'admin_bootstrap_code.txt'}</p> : null}
             <div className="action-row login-actions">
               <button type="submit" disabled={busy || username.trim().length < 3 || password.length < 4 || (showBootstrap && bootstrapCode.trim().length < 8)}>{busy ? 'Validando...' : showBootstrap ? ownerMode ? 'Crear acceso owner' : 'Crear acceso admin' : 'Entrar'}</button>

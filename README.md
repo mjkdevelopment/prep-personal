@@ -71,6 +71,7 @@ npm run build
 5. El primer arranque creara automaticamente la cuenta owner solo si todavia no existe una cuenta owner en la base.
 6. El build instalara dependencias del frontend, generara `frontend/dist`, instalara el backend Python y publicara FastAPI en el puerto asignado.
 7. La SPA y la API quedaran servidas desde el mismo contenedor.
+8. En Railway el bootstrap manual por codigo local queda deshabilitado por defecto. Si no existe owner, la cuenta inicial debe entrar por `OWNER_BOOTSTRAP_USERNAME` y `OWNER_BOOTSTRAP_PASSWORD` o por la restauracion del volumen persistente correcto.
 
 ### Bootstrap automatico owner
 
@@ -78,6 +79,7 @@ npm run build
 - Si luego haces redeploy con las mismas variables, la app no recrea ni pisa la cuenta owner.
 - Si `OWNER_BOOTSTRAP_USERNAME` coincide con un usuario existente, el arranque fallara para obligar a corregir la configuracion.
 - Si activas `REQUIRE_EXISTING_DB=1`, el servicio fallara al arrancar cuando no exista `APP_DB_PATH`; esto evita que Railway levante una instalacion nueva en silencio sobre un volumen vacio o incorrecto.
+- Si realmente necesitas el bootstrap manual otra vez, debes habilitarlo de forma explicita con `ALLOW_OWNER_BOOTSTRAP_UI=1`. No queda activo por defecto en Railway.
 - Despues del primer deploy estable, conviene borrar `OWNER_BOOTSTRAP_PASSWORD` de Railway o rotarla desde el propio panel owner.
 
 Puedes partir de este archivo de ejemplo: `.env.railway.example`.

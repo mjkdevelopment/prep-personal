@@ -27,6 +27,16 @@ def _env_flag(name: str) -> bool:
     return os.getenv(name, '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
+def _is_hosted_environment() -> bool:
+    return any(name.startswith('RAILWAY_') for name in os.environ)
+
+
+def _manual_owner_bootstrap_enabled() -> bool:
+    if _env_flag('ALLOW_OWNER_BOOTSTRAP_UI'):
+        return True
+    return not _is_hosted_environment()
+
+
 def _require_existing_db(database_path: str) -> None:
     if not _env_flag('REQUIRE_EXISTING_DB'):
         return
@@ -75,6 +85,8 @@ async def lifespan(_: FastAPI):
             warning_parts.append('Este arranque creo un archivo SQLite nuevo; si esperabas tus usuarios anteriores, revisa el volumen persistente de Railway.')
         if any(name.startswith('RAILWAY_') for name in os.environ) and not database.db_path.startswith('/data/'):
             warning_parts.append('APP_DB_PATH no apunta a /data. Define APP_DB_PATH=/data/gride_ledger.db y monta el volumen en /data.')
+        if _is_hosted_environment() and not _manual_owner_bootstrap_enabled():
+            warning_parts.append('El bootstrap manual owner esta deshabilitado en Railway. Crea la cuenta owner con OWNER_BOOTSTRAP_USERNAME y OWNER_BOOTSTRAP_PASSWORD, o vuelve a montar la base persistente correcta.')
         database.startup_warning = ' '.join(warning_parts)
     yield
 
@@ -132,12 +144,15 @@ def healthcheck() -> dict[str, str]:
 @app.get('/api/auth/status', response_model=AuthStatus)
 def auth_status(x_session_token: str | None = Header(default=None)):
     user = database.get_session_user(x_session_token)
-    admin_bootstrap_required = database.admin_bootstrap_required()
-    return AuthStatus(authenticated=user is not None, has_users=database.has_users(), admin_bootstrap_required=admin_bootstrap_required, admin_bootstrap_code_path=database.bootstrap_code_path if admin_bootstrap_required else None, owner_bootstrap_warning=database.startup_warning, setup_complete=user.setup_complete if user else False, username=user.username if user else None, role=user.role if user else None, can_edit_data=user.can_edit_data if user else False, can_manage_users=user.can_manage_users if user else False)
+    bootstrap_needed = database.admin_bootstrap_required()
+    bootstrap_enabled = bootstrap_needed and _manual_owner_bootstrap_enabled()
+    return AuthStatus(authenticated=user is not None, has_users=database.has_users(), admin_bootstrap_required=bootstrap_enabled, owner_bootstrap_enabled=bootstrap_enabled, admin_bootstrap_code_path=database.bootstrap_code_path if bootstrap_enabled else None, owner_bootstrap_warning=database.startup_warning, setup_complete=user.setup_complete if user else False, username=user.username if user else None, role=user.role if user else None, can_edit_data=user.can_edit_data if user else False, can_manage_users=user.can_manage_users if user else False)
 
 
 @app.post('/api/auth/bootstrap-owner', response_model=LoginResponse)
 def bootstrap_owner(payload: AdminBootstrapRequest):
+    if not _manual_owner_bootstrap_enabled():
+        raise HTTPException(status_code=403, detail='El bootstrap manual owner esta deshabilitado en este entorno. Configura OWNER_BOOTSTRAP_USERNAME y OWNER_BOOTSTRAP_PASSWORD para crear la cuenta owner inicial.')
     try:
         user = database.bootstrap_owner(payload.username, payload.password, payload.bootstrap_code)
     except ValueError as exc:
