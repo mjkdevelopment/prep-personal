@@ -281,6 +281,63 @@ function cadenceProjectionCopy(amount: number, cadence: FixedIncomeCadence, sing
   return `Se esperan ${payments} ${singularLabel}s de ${currency(amount)}. Base mensual: ${currency(monthlyExpected)}.`
 }
 
+const weekdayLabels: Record<number, string> = {
+  1: 'Lunes',
+  2: 'Martes',
+  3: 'Miercoles',
+  4: 'Jueves',
+  5: 'Viernes',
+  6: 'Sabado',
+  7: 'Domingo',
+}
+
+function clampDayOfMonth(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 15
+  }
+  return Math.min(31, Math.max(1, Math.trunc(value)))
+}
+
+function clampWeekday(value: number | null | undefined): number {
+  if (!value || !Number.isFinite(value)) {
+    return 1
+  }
+  return Math.min(7, Math.max(1, Math.trunc(value)))
+}
+
+function cadenceScheduleCopy(cadence: FixedIncomeCadence, dayOfMonth: number, weekday: number | null | undefined): string {
+  switch (cadence) {
+    case 'weekly':
+      return `Semanal · ${weekdayLabels[clampWeekday(weekday)]}`
+    case 'biweekly':
+      return 'Quincenal · dias 15 y 30'
+    default:
+      return `Mensual · dia ${clampDayOfMonth(dayOfMonth)}`
+  }
+}
+
+function normalizeFixedIncomeCadenceFields(payload: FixedIncomeSourceInput): FixedIncomeSourceInput {
+  switch (payload.cadence) {
+    case 'weekly':
+      return { ...payload, expected_day: 1, expected_weekday: clampWeekday(payload.expected_weekday) }
+    case 'biweekly':
+      return { ...payload, expected_day: 15, expected_weekday: null }
+    default:
+      return { ...payload, expected_day: clampDayOfMonth(payload.expected_day), expected_weekday: null }
+  }
+}
+
+function normalizeObligationCadenceFields(payload: ObligationInput): ObligationInput {
+  switch (payload.cadence) {
+    case 'weekly':
+      return { ...payload, due_day: 1, due_weekday: clampWeekday(payload.due_weekday) }
+    case 'biweekly':
+      return { ...payload, due_day: 15, due_weekday: null }
+    default:
+      return { ...payload, due_day: clampDayOfMonth(payload.due_day), due_weekday: null }
+  }
+}
+
 function VisualBadge({ iconToken, colorToken, narrow = false }: { iconToken: string; colorToken: string; narrow?: boolean }) {
   return <span className={narrow ? 'icon-badge narrow' : 'icon-badge'} style={{ background: `${tokenColor(colorToken)}22`, color: tokenColor(colorToken) }}>{iconGlyph(iconToken)}</span>
 }
@@ -603,10 +660,11 @@ function App() {
     event.preventDefault()
     setSaving(true)
     try {
+      const payload = normalizeFixedIncomeCadenceFields(fixedIncomeForm)
       if (editingFixedIncomeId) {
-        await updateFixedIncomeSource(editingFixedIncomeId, fixedIncomeForm)
+        await updateFixedIncomeSource(editingFixedIncomeId, payload)
       } else {
-        await createFixedIncomeSource(fixedIncomeForm)
+        await createFixedIncomeSource(payload)
       }
       setFixedIncomeForm(emptyFixedIncome(defaultWallet))
       setEditingFixedIncomeId(null)
@@ -622,7 +680,7 @@ function App() {
     event.preventDefault()
     setSaving(true)
     try {
-      const payload = deriveObligationKind(obligationForm, expenseCategories)
+      const payload = deriveObligationKind(normalizeObligationCadenceFields(obligationForm), expenseCategories)
       if (editingObligationId) {
         await updateObligation(editingObligationId, payload)
       } else {
@@ -1312,16 +1370,32 @@ function BaseTab({
           </label>
           <label>
             Frecuencia
-            <select value={fixedIncomeForm.cadence} onChange={(event) => setFixedIncomeForm((current) => ({ ...current, cadence: event.target.value as FixedIncomeSourceInput['cadence'] }))}>
+            <select value={fixedIncomeForm.cadence} onChange={(event) => setFixedIncomeForm((current) => normalizeFixedIncomeCadenceFields({ ...current, cadence: event.target.value as FixedIncomeSourceInput['cadence'] }))}>
               <option value="monthly">Mensual</option>
               <option value="biweekly">Quincenal</option>
               <option value="weekly">Semanal</option>
             </select>
           </label>
-          <label>
-            Dia esperado
-            <input type="number" min="1" max="31" value={fixedIncomeForm.expected_day} onChange={(event) => setFixedIncomeForm((current) => ({ ...current, expected_day: Number(event.target.value) }))} />
-          </label>
+          {fixedIncomeForm.cadence === 'monthly' ? (
+            <label>
+              Dia esperado del mes
+              <input type="number" min="1" max="31" value={fixedIncomeForm.expected_day} onChange={(event) => setFixedIncomeForm((current) => ({ ...current, expected_day: clampDayOfMonth(Number(event.target.value)) }))} />
+            </label>
+          ) : null}
+          {fixedIncomeForm.cadence === 'biweekly' ? (
+            <label>
+              Fechas de pago
+              <input value="15 y 30 de cada mes" readOnly />
+            </label>
+          ) : null}
+          {fixedIncomeForm.cadence === 'weekly' ? (
+            <label>
+              Dia de la semana
+              <select value={clampWeekday(fixedIncomeForm.expected_weekday)} onChange={(event) => setFixedIncomeForm((current) => ({ ...current, expected_weekday: clampWeekday(Number(event.target.value)) }))}>
+                {Object.entries(weekdayLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+          ) : null}
           <label>
             Cartera
             <select value={fixedIncomeForm.wallet} onChange={(event) => setFixedIncomeForm((current) => ({ ...current, wallet: event.target.value }))}>
@@ -1342,7 +1416,7 @@ function BaseTab({
                 <VisualBadge iconToken={incomeWallets.get(item.wallet)?.icon ?? 'briefcase'} colorToken={incomeWallets.get(item.wallet)?.color ?? 'sky'} />
                 <div>
                   <strong>{item.label}</strong>
-                  <p>{item.cadence} · {item.wallet} · dia {item.expected_day}</p>
+                  <p>{cadenceScheduleCopy(item.cadence, item.expected_day, item.expected_weekday)} · {item.wallet}</p>
                 </div>
               </div>
               <div className="list-actions">
@@ -1372,16 +1446,32 @@ function BaseTab({
           </label>
           <label>
             Frecuencia
-            <select value={obligationForm.cadence} onChange={(event) => setObligationForm((current) => ({ ...current, cadence: event.target.value as ObligationInput['cadence'] }))}>
+            <select value={obligationForm.cadence} onChange={(event) => setObligationForm((current) => normalizeObligationCadenceFields({ ...current, cadence: event.target.value as ObligationInput['cadence'] }))}>
               <option value="monthly">Mensual</option>
               <option value="biweekly">Quincenal</option>
               <option value="weekly">Semanal</option>
             </select>
           </label>
-          <label>
-            Dia de vencimiento
-            <input type="number" min="1" max="31" value={obligationForm.due_day} onChange={(event) => setObligationForm((current) => ({ ...current, due_day: Number(event.target.value) }))} />
-          </label>
+          {obligationForm.cadence === 'monthly' ? (
+            <label>
+              Dia de vencimiento
+              <input type="number" min="1" max="31" value={obligationForm.due_day} onChange={(event) => setObligationForm((current) => ({ ...current, due_day: clampDayOfMonth(Number(event.target.value)) }))} />
+            </label>
+          ) : null}
+          {obligationForm.cadence === 'biweekly' ? (
+            <label>
+              Fechas de vencimiento
+              <input value="15 y 30 de cada mes" readOnly />
+            </label>
+          ) : null}
+          {obligationForm.cadence === 'weekly' ? (
+            <label>
+              Dia de vencimiento semanal
+              <select value={clampWeekday(obligationForm.due_weekday)} onChange={(event) => setObligationForm((current) => ({ ...current, due_weekday: clampWeekday(Number(event.target.value)) }))}>
+                {Object.entries(weekdayLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+          ) : null}
           <label>
             Estado
             <select value={obligationForm.status} onChange={(event) => setObligationForm((current) => ({ ...current, status: event.target.value }))}>
@@ -1404,7 +1494,7 @@ function BaseTab({
                 })()}
                 <div>
                   <strong>{item.label}</strong>
-                  <p>{item.status} · {item.cadence} · dia {item.due_day}</p>
+                  <p>{item.status} · {cadenceScheduleCopy(item.cadence, item.due_day, item.due_weekday)}</p>
                 </div>
               </div>
               <div className="list-actions">
@@ -1960,12 +2050,13 @@ function SetupWizard({
 
   const saveIncome = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const payload = normalizeFixedIncomeCadenceFields(incomeForm)
     setFixedIncomes((current) => {
       const next = [...current]
       if (editingIncomeIndex === null) {
-        next.push(incomeForm)
+        next.push(payload)
       } else {
-        next[editingIncomeIndex] = incomeForm
+        next[editingIncomeIndex] = payload
       }
       return next
     })
@@ -1975,7 +2066,7 @@ function SetupWizard({
 
   const saveObligation = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const payload = deriveObligationKind(obligationForm, expenseCategories)
+    const payload = deriveObligationKind(normalizeObligationCadenceFields(obligationForm), expenseCategories)
     setObligations((current) => {
       const next = [...current]
       if (editingObligationIndex === null) {
@@ -2036,16 +2127,32 @@ function SetupWizard({
             </label>
             <label>
               Frecuencia
-              <select value={incomeForm.cadence} onChange={(event) => setIncomeForm((current) => ({ ...current, cadence: event.target.value as FixedIncomeSourceInput['cadence'] }))}>
+              <select value={incomeForm.cadence} onChange={(event) => setIncomeForm((current) => normalizeFixedIncomeCadenceFields({ ...current, cadence: event.target.value as FixedIncomeSourceInput['cadence'] }))}>
                 <option value="monthly">Mensual</option>
                 <option value="biweekly">Quincenal</option>
                 <option value="weekly">Semanal</option>
               </select>
             </label>
-            <label>
-              Dia esperado
-              <input type="number" min="1" max="31" value={incomeForm.expected_day} onChange={(event) => setIncomeForm((current) => ({ ...current, expected_day: Number(event.target.value) }))} />
-            </label>
+            {incomeForm.cadence === 'monthly' ? (
+              <label>
+                Dia esperado del mes
+                <input type="number" min="1" max="31" value={incomeForm.expected_day} onChange={(event) => setIncomeForm((current) => ({ ...current, expected_day: clampDayOfMonth(Number(event.target.value)) }))} />
+              </label>
+            ) : null}
+            {incomeForm.cadence === 'biweekly' ? (
+              <label>
+                Fechas de pago
+                <input value="15 y 30 de cada mes" readOnly />
+              </label>
+            ) : null}
+            {incomeForm.cadence === 'weekly' ? (
+              <label>
+                Dia de la semana
+                <select value={clampWeekday(incomeForm.expected_weekday)} onChange={(event) => setIncomeForm((current) => ({ ...current, expected_weekday: clampWeekday(Number(event.target.value)) }))}>
+                  {Object.entries(weekdayLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+            ) : null}
             <label>
               Cartera
               <select value={incomeForm.wallet} onChange={(event) => setIncomeForm((current) => ({ ...current, wallet: event.target.value }))}>
@@ -2065,12 +2172,12 @@ function SetupWizard({
               <article key={`${item.label}-${index}`} className="list-card">
                 <div>
                   <strong>{item.label}</strong>
-                  <p>{item.cadence} · {item.wallet} · dia {item.expected_day}</p>
+                  <p>{cadenceScheduleCopy(item.cadence, item.expected_day, item.expected_weekday)} · {item.wallet}</p>
                   <small>{cadenceProjectionCopy(item.amount, item.cadence, 'pago')}</small>
                 </div>
                 <div className="list-actions">
                   <span className="amount positive">{currency(cadenceExpectedMonthlyAmount(item.amount, item.cadence))}</span>
-                  <button type="button" className="ghost" disabled={!canEditData} onClick={() => { setEditingIncomeIndex(index); setIncomeForm(item) }}>Editar</button>
+                  <button type="button" className="ghost" disabled={!canEditData} onClick={() => { setEditingIncomeIndex(index); setIncomeForm(normalizeFixedIncomeCadenceFields(item)) }}>Editar</button>
                   <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => setFixedIncomes((current) => current.filter((_, currentIndex) => currentIndex !== index))}>Borrar</button>
                 </div>
               </article>
@@ -2098,16 +2205,32 @@ function SetupWizard({
             </label>
             <label>
               Frecuencia
-              <select value={obligationForm.cadence} onChange={(event) => setLocalObligationForm((current) => ({ ...current, cadence: event.target.value as ObligationInput['cadence'] }))}>
+              <select value={obligationForm.cadence} onChange={(event) => setLocalObligationForm((current) => normalizeObligationCadenceFields({ ...current, cadence: event.target.value as ObligationInput['cadence'] }))}>
                 <option value="monthly">Mensual</option>
                 <option value="biweekly">Quincenal</option>
                 <option value="weekly">Semanal</option>
               </select>
             </label>
-            <label>
-              Dia de vencimiento
-              <input type="number" min="1" max="31" value={obligationForm.due_day} onChange={(event) => setLocalObligationForm((current) => ({ ...current, due_day: Number(event.target.value) }))} />
-            </label>
+            {obligationForm.cadence === 'monthly' ? (
+              <label>
+                Dia de vencimiento
+                <input type="number" min="1" max="31" value={obligationForm.due_day} onChange={(event) => setLocalObligationForm((current) => ({ ...current, due_day: clampDayOfMonth(Number(event.target.value)) }))} />
+              </label>
+            ) : null}
+            {obligationForm.cadence === 'biweekly' ? (
+              <label>
+                Fechas de vencimiento
+                <input value="15 y 30 de cada mes" readOnly />
+              </label>
+            ) : null}
+            {obligationForm.cadence === 'weekly' ? (
+              <label>
+                Dia de vencimiento semanal
+                <select value={clampWeekday(obligationForm.due_weekday)} onChange={(event) => setLocalObligationForm((current) => ({ ...current, due_weekday: clampWeekday(Number(event.target.value)) }))}>
+                  {Object.entries(weekdayLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+            ) : null}
             <label>
               Estado
               <select value={obligationForm.status} onChange={(event) => setLocalObligationForm((current) => ({ ...current, status: event.target.value }))}>
@@ -2126,12 +2249,12 @@ function SetupWizard({
               <article key={`${item.label}-${index}`} className="list-card">
                 <div>
                   <strong>{item.label}</strong>
-                  <p>{item.status} · {item.cadence} · dia {item.due_day}</p>
+                  <p>{item.status} · {cadenceScheduleCopy(item.cadence, item.due_day, item.due_weekday)}</p>
                   <small>{cadenceProjectionCopy(item.amount, item.cadence, 'pago')}</small>
                 </div>
                 <div className="list-actions">
                   <span className="amount neutral">{currency(cadenceExpectedMonthlyAmount(item.amount, item.cadence))}</span>
-                  <button type="button" className="ghost" disabled={!canEditData} onClick={() => { setEditingObligationIndex(index); setLocalObligationForm(item) }}>Editar</button>
+                  <button type="button" className="ghost" disabled={!canEditData} onClick={() => { setEditingObligationIndex(index); setLocalObligationForm(normalizeObligationCadenceFields(item)) }}>Editar</button>
                   <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => setObligations((current) => current.filter((_, currentIndex) => currentIndex !== index))}>Borrar</button>
                 </div>
               </article>
