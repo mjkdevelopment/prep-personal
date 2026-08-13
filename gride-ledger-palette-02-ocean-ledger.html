@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gride Ledger Palette 02</title>
+  <style>
+    :root { --bg:#eef6f7; --surface:#ffffff; --text:#122128; --muted:#637981; --primary:#163847; --secondary:#3f7a8c; --accent:#efb64a; --signal:#e57d64; --soft:#dcecf0; }
+    *{box-sizing:border-box} body{margin:0;font-family:"Avenir Next",ui-sans-serif,system-ui,sans-serif;background:linear-gradient(180deg,#fbfeff,var(--bg));color:var(--text)}
+    .page{max-width:1080px;margin:0 auto;padding:42px 28px 72px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}.card{background:var(--surface);border-radius:30px;padding:28px;box-shadow:0 18px 46px rgba(22,56,71,.1)}
+    .hero{background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff}.eyebrow{font-size:12px;letter-spacing:.2em;text-transform:uppercase;opacity:.8}.title{font-size:58px;line-height:.98;margin:14px 0}.sub{line-height:1.55;color:rgba(255,255,255,.82)}
+    .swatches{display:flex;gap:14px;margin-top:24px}.tone{flex:1;height:96px;border-radius:20px}.label{margin-top:10px;font-size:12px;color:var(--muted);font-weight:700}.list{display:grid;gap:14px;margin-top:16px}.row{padding:16px;border-radius:18px;background:var(--soft)}
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="grid">
+      <article class="card hero">
+        <div class="eyebrow">Palette 02</div>
+        <div class="title">Ocean Ledger</div>
+        <p class="sub">Mas fresca y tecnologica, con lectura limpia y un aire ejecutivo menos clasico.</p>
+      </article>
+      <article class="card">
+        <strong>Ideal si quieres mas vida visual sin perder seriedad.</strong>
+        <div class="swatches">
+          <div style="flex:1"><div class="tone" style="background:#163847"></div><div class="label">Navy</div></div>
+          <div style="flex:1"><div class="tone" style="background:#3f7a8c"></div><div class="label">Ocean</div></div>
+          <div style="flex:1"><div class="tone" style="background:#efb64a"></div><div class="label">Amber</div></div>
+          <div style="flex:1"><div class="tone" style="background:#e57d64"></div><div class="label">Coral</div></div>
+        </div>
+      </article>
+    </section>
+    <section class="list">
+      <article class="row">Hero fuerte, cards blancas, acentos azul petroleo.</article>
+      <article class="row">Buena para dashboards con graficos y comparativas mensuales.</article>
+      <article class="row">Mantiene contraste alto y lectura rapida en Android.</article>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gride Ledger Palette 01</title>
+  <style>
+    :root {
+      --bg: #f6f1e8;
+      --surface: #fffaf3;
+      --text: #18221f;
+      --muted: #6a756f;
+      --primary: #173d3a;
+      --secondary: #2e685b;
+      --accent: #d7a55a;
+      --accent-soft: #e8d3aa;
+      --signal: #c97657;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Georgia, serif; background: radial-gradient(circle at top, #fffdf9, var(--bg)); color: var(--text); }
+    .page { max-width: 1080px; margin: 0 auto; padding: 40px 28px 72px; }
+    .hero { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 28px; }
+    .card { background: var(--surface); border-radius: 28px; padding: 28px; box-shadow: 0 20px 50px rgba(23,61,58,.12); }
+    .hero-card { background: linear-gradient(145deg, var(--primary), var(--secondary)); color: white; }
+    .eyebrow { letter-spacing: .18em; text-transform: uppercase; font-size: 12px; opacity: .8; }
+    h1 { font-size: 64px; line-height: .95; margin: 10px 0 14px; }
+    p { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; line-height: 1.55; }
+    .amount { font-size: 56px; margin-top: 26px; }
+    .swatches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 22px; }
+    .swatch { border-radius: 18px; overflow: hidden; background: white; }
+    .tone { height: 84px; }
+    .meta { padding: 10px 12px 14px; font: 600 12px/1.3 ui-sans-serif, system-ui, sans-serif; }
+    .mock { margin-top: 28px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .pill { display: inline-block; padding: 8px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--primary); font: 700 12px ui-sans-serif, system-ui, sans-serif; }
+    .bar { height: 12px; border-radius: 999px; background: #ede5d8; overflow: hidden; margin-top: 12px; }
+    .fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--secondary), var(--accent)); }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <article class="card hero-card">
+        <div class="eyebrow">Palette 01</div>
+        <h1>Emerald Editorial</h1>
+        <p>La mas cercana a un look premium sobrio con acentos calidos y fondos crema.</p>
+        <div class="amount">$12,450</div>
+        <p>Disponible personal seguro con tono financiero serio y elegante.</p>
+      </article>
+      <article class="card">
+        <span class="pill">Recomendada si quieres lujo sobrio</span>
+        <div class="swatches">
+          <div class="swatch"><div class="tone" style="background:#173d3a"></div><div class="meta">Primary</div></div>
+          <div class="swatch"><div class="tone" style="background:#2e685b"></div><div class="meta">Secondary</div></div>
+          <div class="swatch"><div class="tone" style="background:#d7a55a"></div><div class="meta">Accent</div></div>
+          <div class="swatch"><div class="tone" style="background:#c97657"></div><div class="meta">Signal</div></div>
+          <div class="swatch"><div class="tone" style="background:#f6f1e8"></div><div class="meta">Canvas</div></div>
+        </div>
+      </article>
+    </section>
+    <section class="mock">
+      <article class="card"><strong>Home</strong><div class="bar"><div class="fill" style="width:72%"></div></div></article>
+      <article class="card"><strong>Plan quincenal</strong><div class="bar"><div class="fill" style="width:58%"></div></div></article>
+      <article class="card"><strong>Radar de gastos</strong><div class="bar"><div class="fill" style="width:81%"></div></div></article>
+    </section>
+  </main>
+</body>
+</html>
