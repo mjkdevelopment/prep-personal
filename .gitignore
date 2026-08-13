@@ -50,3 +50,11 @@ app.*.map.json
 
 # Local installable artifacts
 /*.apk
+
+# Local backend state
+/backend/data/*.db
+/backend/data/admin_bootstrap_code.txt
+
+# Frontend local artifacts
+/frontend/node_modules/
+/frontend/dist/

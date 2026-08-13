@@ -1,47 +1,91 @@
-# Prep Personal
+# Gride Ledger
 
-Aplicacion Android offline para manejo de gastos personales, ingresos variables y planeacion por quincena.
+Aplicacion web para manejo de ingresos, gastos, obligaciones y reserva por quincena. La APK queda en pausa: el producto principal ahora es web, con backend en Python y frontend React, desplegable en Railway.
 
-## Estado actual
+## Stack actual
 
-Este repositorio ya incluye:
+- Backend: FastAPI + SQLite.
+- Frontend: React + Vite + TypeScript.
+- Deploy: Railway con un solo Dockerfile.
 
-- Base Flutter orientada a Android.
-- Shell inicial del MVP con navegacion inferior.
-- Pantallas iniciales para Inicio, Transacciones, Plan, Insights y Ajustes.
-- Persistencia local real con SQLite para ingresos fijos, obligaciones y transacciones.
-- Formularios funcionales para registrar transacciones y editar ingresos fijos mensuales.
-- Motor inicial de asignacion por ingreso segun obligaciones, metas e ingreso esperado.
-- Documentacion funcional y tecnica en la carpeta docs.
+## Regla financiera conservada
 
-## Enfoque del producto
+1. Reservar obligaciones proximas y criticas.
+2. Reservar metas minimas de ahorro, inversion y deuda.
+3. Comparar ingreso esperado contra ingreso real reportado.
+4. Liberar solo el remanente como disponible personal.
 
-Prep Personal no trata el 50, 30, 20 como regla fija. Lo usa como objetivo adaptable. El motor real prioriza:
+## Estructura
 
-1. Obligaciones fijas y fechas de vencimiento.
-2. Metas de ahorro, inversion y deuda.
-3. Disponible personal autentico segun ingreso reportado y reserva de quincena.
+- backend/: API, persistencia y calculos financieros.
+- backend/tests/: pruebas base del backend.
+- frontend/: SPA con dashboard, formularios e historial editable.
+- docs/: documentacion funcional heredada.
+- lib/: implementacion Flutter anterior, retenida solo como referencia del dominio.
 
-## Estructura inicial
+## Desarrollo local
 
-- lib/src/app.dart: shell principal de la aplicacion.
-- lib/src/core: tema, widgets base y utilidades.
-- lib/src/features: pantallas funcionales del MVP.
-- lib/src/mock: datos semilla para prototipado del dominio.
-- docs: especificacion funcional y arquitectura v1.
-
-## Comandos utiles
+### Backend
 
 ```bash
-flutter pub get
-flutter analyze
-flutter test
-flutter run
+python -m pip install -r backend/requirements.txt
+uvicorn backend.app.main:app --reload
 ```
 
-## Siguiente fase recomendada
+### Frontend
 
-1. Incorporar persistencia local con Drift o SQLite tipado.
-2. Reemplazar categorias y obligaciones semilla por CRUD completo.
-3. Refinar el motor financiero con pruebas unitarias mas exhaustivas.
-4. Integrar exportacion e importacion de respaldos offline.
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+El frontend usa `/api` como base. En produccion FastAPI sirve `frontend/dist` para publicar API y SPA desde el mismo proceso.
+
+## Validacion
+
+### Backend
+
+```bash
+python -m pytest backend/tests -q
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm run build
+```
+
+## Deploy en Railway
+
+1. Conectar el repositorio a Railway.
+2. Dejar que Railway use el Dockerfile de la raiz.
+3. Crear un volumen persistente y montarlo en `/data`.
+4. Configurar estas variables de entorno en Railway antes del primer deploy:
+	- `APP_DB_PATH=/data/gride_ledger.db`
+	- `OWNER_BOOTSTRAP_USERNAME=<tu usuario owner inicial>`
+	- `OWNER_BOOTSTRAP_PASSWORD=<tu contrasena owner inicial>`
+	- `OWNER_BOOTSTRAP_THEME_ID=emerald_editorial` opcional
+5. El primer arranque creara automaticamente la cuenta owner solo si todavia no existe una cuenta owner en la base.
+6. El build instalara dependencias del frontend, generara `frontend/dist`, instalara el backend Python y publicara FastAPI en el puerto asignado.
+7. La SPA y la API quedaran servidas desde el mismo contenedor.
+
+### Bootstrap automatico owner
+
+- El bootstrap por variables de entorno ocurre una sola vez: cuando no existe ningun usuario `owner`.
+- Si luego haces redeploy con las mismas variables, la app no recrea ni pisa la cuenta owner.
+- Si `OWNER_BOOTSTRAP_USERNAME` coincide con un usuario existente, el arranque fallara para obligar a corregir la configuracion.
+- Despues del primer deploy estable, conviene borrar `OWNER_BOOTSTRAP_PASSWORD` de Railway o rotarla desde el propio panel owner.
+
+Puedes partir de este archivo de ejemplo: `.env.railway.example`.
+
+## Estado funcional actual
+
+- Dashboard financiero con disponible recomendado, gasto mensual y cobertura.
+- CRUD de movimientos con edicion y borrado.
+- CRUD de ingresos fijos esperados.
+- CRUD de obligaciones.
+- Sugerencia de distribucion al registrar ingresos.
+- Insights y buckets mensuales derivados del dominio original.
+- Importacion de un archivo legado `prep_personal.db` desde la propia interfaz web.

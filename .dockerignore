@@ -1,0 +1,11 @@
+.git
+.dart_tool
+.idea
+android
+build
+node_modules
+frontend/node_modules
+frontend/dist
+web
+gride-ledger-debug.apk
+.pytest_cache

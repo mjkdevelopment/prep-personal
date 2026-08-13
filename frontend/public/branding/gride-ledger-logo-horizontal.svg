@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 320" width="1220" height="320">
+  <g transform="translate(12,12) scale(0.58)">
+    
+  <rect width="512" height="512" rx="116" fill="none"/>
+  <path d="M256 78c-98.3 0-178 79.7-178 178s79.7 178 178 178c75.8 0 140.5-47.4 166.1-114.2H255.5v-70.6H434v6.8C434 354.3 354.3 434 256 434S78 354.3 78 256 157.7 78 256 78c54.8 0 103.9 24.8 136.5 63.7l-55 46.3C317.3 163.8 288 149 256 149c-59.1 0-107 47.9-107 107s47.9 107 107 107c34 0 64.3-15.9 83.9-40.7H256v-70.6h165.9C420.3 155.4 342.5 78 256 78z" fill="#2864FF"/>
+  <rect x="230" y="294" width="42" height="52" rx="12" fill="#3DDC97"/>
+  <rect x="286" y="270" width="42" height="76" rx="12" fill="#3DDC97"/>
+  <rect x="342" y="246" width="42" height="100" rx="12" fill="#3DDC97"/>
+
+  </g>
+  <text x="360" y="155" font-family="Inter, Arial, sans-serif" font-size="96" font-weight="800" letter-spacing="-4" fill="#0B1739">Gride</text>
+  <text x="360" y="246" font-family="Inter, Arial, sans-serif" font-size="96" font-weight="650" letter-spacing="-4" fill="#2864FF">Ledger</text>
+</svg>

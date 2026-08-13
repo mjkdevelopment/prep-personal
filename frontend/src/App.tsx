@@ -1,0 +1,2043 @@
+import { useEffect, useMemo, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from 'react'
+import './App.css'
+import {
+  bootstrapOwner,
+  bootstrapAdmin,
+  changePassword,
+  clearSessionToken,
+  completeInitialSetup,
+  createUser,
+  createFixedIncomeSource,
+  createObligation,
+  createTransaction,
+  deleteCategory,
+  deleteFixedIncomeSource,
+  deleteObligation,
+  deleteTag,
+  deleteTransaction,
+  deleteUser,
+  fetchAuthStatus,
+  fetchBootstrap,
+  fetchIncomeSuggestion,
+  fetchOwnerPanel,
+  importFlutterDatabase,
+  login,
+  loginOwner,
+  logout,
+  resetInitialSetup,
+  updateThemePreference,
+  updateUserAccess,
+  updateFixedIncomeSource,
+  updateObligation,
+  updateTransaction,
+  upsertCategory,
+  upsertTag,
+} from './api'
+import { applyTheme, getStoredTheme, palettes } from './themes'
+import type {
+  AllocationSuggestion,
+  AuthStatus,
+  AuditEvent,
+  BootstrapResponse,
+  CategoryConfig,
+  CategoryConfigInput,
+  FixedIncomeSource,
+  FixedIncomeSourceInput,
+  FlutterImportSummary,
+  InitialSetupPayload,
+  LoginResponse,
+  Obligation,
+  ObligationInput,
+  OwnerPanelResponse,
+  TagConfig,
+  TagConfigInput,
+  Transaction,
+  TransactionInput,
+  TransactionKind,
+  UserRole,
+} from './types'
+import { currency, formatDateInput } from './utils'
+import { colorTokens, iconGlyph, iconTokens, slugify, tokenColor } from './visuals'
+
+type AppTab = 'dashboard' | 'transactions' | 'base' | 'settings'
+
+const appTabs: Array<{ id: AppTab; label: string }> = [
+  { id: 'dashboard', label: 'Resumen' },
+  { id: 'transactions', label: 'Movimientos' },
+  { id: 'base', label: 'Base' },
+  { id: 'settings', label: 'Ajustes' },
+]
+
+const helpSections: Array<{ title: string; items: string[] }> = [
+  {
+    title: 'Resumen',
+    items: [
+      'Te da una lectura rapida del mes: gasto, cobertura y disponible sugerido.',
+      'El grafico destaca en que categorias se esta yendo tu dinero.',
+      'Insights resume senales utiles para decidir con mas criterio.',
+    ],
+  },
+  {
+    title: 'Movimientos',
+    items: [
+      'Registra ingresos, gastos y movimientos de orden financiero diario.',
+      'Las etiquetas te ayudan a leer patrones sin sobrecargar la vista principal.',
+      'Cuando entra dinero, Gride Ledger propone una distribucion equilibrada.',
+    ],
+  },
+  {
+    title: 'Base',
+    items: [
+      'Aqui defines la estructura fija que sostiene tu planeacion mensual.',
+      'Los compromisos recurrentes sirven para medir cobertura real, no intuicion.',
+      'Si necesitas recomenzar, puedes volver al asistente inicial desde Ajustes.',
+    ],
+  },
+  {
+    title: 'Ajustes',
+    items: [
+      'Controla apariencia, catalogos y mantenimiento desde un solo lugar.',
+      'Categorias y tags adaptan la app a tu lenguaje financiero real.',
+      'La migracion te permite traer historial previo sin reconstruir todo a mano.',
+    ],
+  },
+  {
+    title: 'Usuarios y seguridad',
+    items: [
+      'La cuenta administradora conserva el control de altas del equipo.',
+      'La sesion se mantiene en este navegador hasta que la cierres o cambies la contrasena.',
+      'La primera activacion administrativa exige el codigo local de bootstrap.',
+    ],
+  },
+]
+
+function BrandLogo({ dark = false, markOnly = false, className = '' }: { dark?: boolean; markOnly?: boolean; className?: string }) {
+  const src = markOnly
+    ? dark ? '/branding/gride-ledger-symbol-white.png' : '/branding/gride-ledger-symbol.png'
+    : dark ? '/branding/gride-ledger-logo-horizontal-white.png' : '/branding/gride-ledger-logo-horizontal.png'
+  const alt = markOnly ? 'Gride Ledger' : 'Gride Ledger logo'
+  return <img src={src} alt={alt} className={className} />
+}
+
+const emptyTransaction = (wallet = 'Banco', category = ''): TransactionInput => ({
+  kind: 'ingreso',
+  amount: 0,
+  wallet,
+  category,
+  tags: [],
+  notes: '',
+  date: formatDateInput(new Date().toISOString()),
+  recurring: false,
+})
+
+const emptyFixedIncome = (wallet = 'Banco'): FixedIncomeSourceInput => ({
+  label: '',
+  amount: 0,
+  cadence: 'monthly',
+  expected_day: 15,
+  expected_weekday: null,
+  wallet,
+  active: true,
+})
+
+const emptyObligation = (categoryId = 'casa'): ObligationInput => ({
+  label: '',
+  amount: 0,
+  category_id: categoryId,
+  cadence: 'monthly',
+  due_day: 15,
+  due_weekday: null,
+  kind: 'Fija',
+  status: 'Pendiente',
+})
+
+const emptyCategory = (scope: 'income' | 'expense' = 'expense'): CategoryConfigInput => ({
+  id: '',
+  label: '',
+  scope,
+  type: scope === 'income' ? 'Ingreso' : 'Variable',
+  color_token: 'gold',
+  icon_token: 'receipt',
+  active: true,
+})
+
+const emptyTag = (): TagConfigInput => ({
+  id: '',
+  label: '',
+  color_token: 'sage',
+  active: true,
+})
+
+const roleLabels: Record<UserRole, string> = {
+  owner: 'Owner',
+  admin: 'Administrador',
+  operator: 'Operador',
+  viewer: 'Consulta',
+}
+
+const auditActionLabels: Record<string, string> = {
+  bootstrap_admin: 'Alta inicial de administrador',
+  create_user: 'Creacion de usuario',
+  update_user_access: 'Cambio de acceso',
+  update_theme: 'Cambio de tema',
+  import_flutter_db: 'Importacion de base',
+  complete_setup: 'Wizard completado',
+  reset_setup: 'Reinicio de configuracion',
+}
+
+const transactionKindLabels: Record<TransactionKind, string> = {
+  ingreso: 'Ingreso',
+  gasto: 'Gasto',
+  ahorro: 'Ahorro',
+  inversion: 'Inversion',
+  deuda: 'Deuda',
+  transferencia: 'Transferencia',
+}
+
+function deriveObligationKind(payload: ObligationInput, categories: CategoryConfig[]): ObligationInput {
+  const category = categories.find((item) => item.id === payload.category_id)
+  return { ...payload, kind: category?.type ?? payload.kind }
+}
+
+function resolveErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) {
+    return fallback
+  }
+
+  try {
+    const parsed = JSON.parse(error.message) as { detail?: string }
+    return parsed.detail ?? fallback
+  } catch {
+    return error.message || fallback
+  }
+}
+
+function findCategoryByLabel(categories: CategoryConfig[], label: string, scope?: CategoryConfig['scope']): CategoryConfig | undefined {
+  return categories.find((item) => item.label === label && (scope ? item.scope === scope : true))
+}
+
+function walletVisual(wallet: string): { icon: string; color: string } {
+  switch (wallet) {
+    case 'Efectivo':
+      return { icon: 'paid', color: 'gold' }
+    case 'Banco':
+      return { icon: 'account_balance', color: 'petrol' }
+    case 'Cooperativa':
+      return { icon: 'group', color: 'sage' }
+    default:
+      return { icon: 'briefcase', color: 'sky' }
+  }
+}
+
+function VisualBadge({ iconToken, colorToken, narrow = false }: { iconToken: string; colorToken: string; narrow?: boolean }) {
+  return <span className={narrow ? 'icon-badge narrow' : 'icon-badge'} style={{ background: `${tokenColor(colorToken)}22`, color: tokenColor(colorToken) }}>{iconGlyph(iconToken)}</span>
+}
+
+function TagPill({ label, colorToken }: { label: string; colorToken: string }) {
+  return <span className="history-tag" style={{ background: `${tokenColor(colorToken)}18`, color: tokenColor(colorToken), borderColor: `${tokenColor(colorToken)}33` }}>#{label}</span>
+}
+
+function compactInsightBody(body: string): string {
+  const normalized = body.trim()
+  if (!normalized) {
+    return ''
+  }
+
+  const firstSentence = normalized.match(/.*?[.!?](?:\s|$)/)?.[0]?.trim()
+  if (firstSentence && firstSentence.length <= 110) {
+    return firstSentence
+  }
+
+  return normalized.length <= 110 ? normalized : `${normalized.slice(0, 107).trimEnd()}...`
+}
+
+function insightTone(insight: BootstrapResponse['dashboard']['generated_insights'][number], index: number): { label: string; className: string } {
+  const haystack = `${insight.title} ${insight.body}`.toLowerCase()
+
+  if (/(encima|riesgo|alerta|subio|desvio|pendiente)/.test(haystack)) {
+    return { label: 'Atencion', className: 'warning' }
+  }
+
+  if (/(puedes|oportunidad|aumentar|mejora|ajuste)/.test(haystack)) {
+    return { label: 'Impulso', className: 'positive' }
+  }
+
+  if (/(control|cobertura|estable|cubierto)/.test(haystack)) {
+    return { label: 'Control', className: 'calm' }
+  }
+
+  return index % 2 === 0 ? { label: 'Pulso', className: 'neutral' } : { label: 'Clave', className: 'calm' }
+}
+
+function App() {
+  const isOwnerRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/owner')
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null)
+  const [data, setData] = useState<BootstrapResponse | null>(null)
+  const [ownerData, setOwnerData] = useState<OwnerPanelResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<AppTab>('dashboard')
+  const [selectedTheme, setSelectedTheme] = useState(getStoredTheme())
+  const [transactionForm, setTransactionForm] = useState<TransactionInput>(emptyTransaction())
+  const [fixedIncomeForm, setFixedIncomeForm] = useState<FixedIncomeSourceInput>(emptyFixedIncome())
+  const [obligationForm, setObligationForm] = useState<ObligationInput>(emptyObligation())
+  const [categoryForm, setCategoryForm] = useState<CategoryConfigInput>(emptyCategory())
+  const [tagForm, setTagForm] = useState<TagConfigInput>(emptyTag())
+  const [userForm, setUserForm] = useState<{ username: string; password: string; role: UserRole }>({ username: '', password: '', role: 'operator' })
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '' })
+  const [editingTransactionId, setEditingTransactionId] = useState<number | null>(null)
+  const [editingFixedIncomeId, setEditingFixedIncomeId] = useState<number | null>(null)
+  const [editingObligationId, setEditingObligationId] = useState<number | null>(null)
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
+  const [editingTagId, setEditingTagId] = useState<string | null>(null)
+  const [suggestion, setSuggestion] = useState<AllocationSuggestion | null>(null)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<FlutterImportSummary | null>(null)
+
+  useEffect(() => {
+    applyTheme(selectedTheme)
+  }, [selectedTheme])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    if (authStatus?.authenticated && data?.setup_complete) {
+      document.body.dataset.appTab = activeTab
+      return () => {
+        delete document.body.dataset.appTab
+      }
+    }
+
+    delete document.body.dataset.appTab
+    return undefined
+  }, [activeTab, authStatus?.authenticated, data?.setup_complete])
+
+  const activeCategories = useMemo(() => data?.categories.filter((item) => item.active) ?? [], [data])
+  const incomeCategories = useMemo(() => activeCategories.filter((item) => item.scope === 'income'), [activeCategories])
+  const expenseCategories = useMemo(() => activeCategories.filter((item) => item.scope === 'expense'), [activeCategories])
+  const defaultWallet = data?.wallets[0] ?? 'Banco'
+  const defaultIncomeCategory = incomeCategories[0]?.label ?? ''
+  const defaultExpenseCategoryId = expenseCategories[0]?.id ?? 'casa'
+  const canEditData = data?.can_edit_data ?? false
+
+  const load = async () => {
+    if (isOwnerRoute) {
+      const next = await fetchOwnerPanel()
+      setOwnerData(next)
+      setData(null)
+      setError(null)
+      return
+    }
+
+    const next = await fetchBootstrap()
+    setData(next)
+    setOwnerData(null)
+    setSelectedTheme(next.theme_id)
+    setError(null)
+    const nextIncomeCategory = next.categories.find((item) => item.scope === 'income' && item.active)?.label ?? ''
+    const nextExpenseCategoryId = next.categories.find((item) => item.scope === 'expense' && item.active)?.id ?? 'casa'
+    const nextWallet = next.wallets[0] ?? 'Banco'
+    setTransactionForm((current) => ({ ...current, wallet: current.wallet || nextWallet, category: current.category || nextIncomeCategory }))
+    setFixedIncomeForm((current) => ({ ...current, wallet: current.wallet || nextWallet }))
+    setObligationForm((current) => ({ ...current, category_id: current.category_id || nextExpenseCategoryId }))
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    const boot = async () => {
+      setLoading(true)
+      try {
+        const status = await fetchAuthStatus()
+        if (cancelled) {
+          return
+        }
+        setAuthStatus(status)
+        if (status.authenticated) {
+          if (isOwnerRoute && status.role !== 'owner') {
+            clearSessionToken()
+            setAuthStatus({ ...status, authenticated: false, username: null, role: null, can_edit_data: false, can_manage_users: false })
+            setData(null)
+            setOwnerData(null)
+            setAuthError('Este acceso es exclusivo para la cuenta owner.')
+            return
+          }
+          await load()
+        } else {
+          setData(null)
+          setOwnerData(null)
+        }
+      } catch (bootError) {
+        if (!cancelled) {
+          setAuthError(resolveErrorMessage(bootError, 'No se pudo validar la sesion.'))
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    void boot()
+    return () => {
+      cancelled = true
+    }
+  }, [isOwnerRoute])
+
+  useEffect(() => {
+    if (!authStatus?.authenticated || transactionForm.kind !== 'ingreso' || transactionForm.amount <= 0) {
+      setSuggestion(null)
+      return
+    }
+
+    let cancelled = false
+    void fetchIncomeSuggestion(transactionForm.amount)
+      .then((result) => {
+        if (!cancelled) {
+          setSuggestion(result)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSuggestion(null)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authStatus?.authenticated, transactionForm.amount, transactionForm.kind])
+
+  const refreshAfterAuth = async (response?: LoginResponse) => {
+    setAuthStatus({
+      authenticated: true,
+      has_users: response?.has_users ?? true,
+      admin_bootstrap_required: false,
+      admin_bootstrap_code_path: null,
+      setup_complete: response?.setup_complete ?? true,
+      username: response?.username ?? null,
+      role: response?.role ?? null,
+      can_edit_data: response?.can_edit_data ?? false,
+      can_manage_users: response?.can_manage_users ?? false,
+    })
+    await load()
+  }
+
+  const handleUserSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      await createUser(userForm.username, userForm.password, userForm.role)
+      setUserForm({ username: '', password: '', role: 'operator' })
+      await load()
+    } catch (userError) {
+      setError(resolveErrorMessage(userError, 'No se pudo crear el usuario.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleUserAccessUpdate = async (userId: number, role: UserRole, active: boolean) => {
+    setSaving(true)
+    try {
+      await updateUserAccess(userId, { role, active })
+      await load()
+    } catch (accessError) {
+      setError(resolveErrorMessage(accessError, 'No se pudo actualizar el acceso del usuario.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleUserDelete = async (userId: number, username: string) => {
+    const confirmed = window.confirm(`Se eliminara ${username} junto con sus datos asociados.\n\n¿Deseas continuar?`)
+    if (!confirmed) {
+      return
+    }
+
+    setSaving(true)
+    try {
+      await deleteUser(userId)
+      await load()
+    } catch (deleteError) {
+      setError(resolveErrorMessage(deleteError, 'No se pudo eliminar el usuario.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTransactionSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      if (editingTransactionId) {
+        await updateTransaction(editingTransactionId, transactionForm)
+      } else {
+        await createTransaction(transactionForm)
+      }
+      setTransactionForm(emptyTransaction(defaultWallet, defaultIncomeCategory))
+      setEditingTransactionId(null)
+      await load()
+    } catch (submitError) {
+      setError(resolveErrorMessage(submitError, 'No se pudo guardar el movimiento.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleFixedIncomeSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      if (editingFixedIncomeId) {
+        await updateFixedIncomeSource(editingFixedIncomeId, fixedIncomeForm)
+      } else {
+        await createFixedIncomeSource(fixedIncomeForm)
+      }
+      setFixedIncomeForm(emptyFixedIncome(defaultWallet))
+      setEditingFixedIncomeId(null)
+      await load()
+    } catch (submitError) {
+      setError(resolveErrorMessage(submitError, 'No se pudo guardar el ingreso fijo.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleObligationSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      const payload = deriveObligationKind(obligationForm, expenseCategories)
+      if (editingObligationId) {
+        await updateObligation(editingObligationId, payload)
+      } else {
+        await createObligation(payload)
+      }
+      setObligationForm(emptyObligation(defaultExpenseCategoryId))
+      setEditingObligationId(null)
+      await load()
+    } catch (submitError) {
+      setError(resolveErrorMessage(submitError, 'No se pudo guardar el gasto fijo.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCategorySubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      const id = categoryForm.id.trim() || slugify(categoryForm.label)
+      await upsertCategory({ ...categoryForm, id, type: categoryForm.scope === 'income' ? 'Ingreso' : categoryForm.type })
+      setCategoryForm(emptyCategory())
+      setEditingCategoryId(null)
+      await load()
+    } catch (submitError) {
+      setError(resolveErrorMessage(submitError, 'No se pudo guardar la categoria.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTagSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      const id = tagForm.id.trim() || slugify(tagForm.label)
+      await upsertTag({ ...tagForm, id })
+      setTagForm(emptyTag())
+      setEditingTagId(null)
+      await load()
+    } catch (submitError) {
+      setError(resolveErrorMessage(submitError, 'No se pudo guardar el tag.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleImport = async () => {
+    if (!importFile) {
+      setError('Selecciona primero un archivo prep_personal.db para importar.')
+      return
+    }
+
+    setImporting(true)
+    try {
+      const result = await importFlutterDatabase(importFile, true)
+      setImportResult(result)
+      setImportFile(null)
+      setError(null)
+      setActiveTab('dashboard')
+      await load()
+    } catch (importError) {
+      setError(resolveErrorMessage(importError, 'No se pudo importar la base Flutter.'))
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleReset = async () => {
+    const confirmed = window.confirm('Se borraran ingresos fijos, gastos fijos y transacciones para volver al asistente inicial. Las categorias y tags personalizados se conservan.\n\n¿Deseas reiniciar?')
+    if (!confirmed) {
+      return
+    }
+
+    setSaving(true)
+    try {
+      await resetInitialSetup()
+      setActiveTab('dashboard')
+      setTransactionForm(emptyTransaction(defaultWallet, defaultIncomeCategory))
+      setFixedIncomeForm(emptyFixedIncome(defaultWallet))
+      setObligationForm(emptyObligation(defaultExpenseCategoryId))
+      await load()
+    } catch (resetError) {
+      setError(resolveErrorMessage(resetError, 'No se pudo reiniciar la configuracion.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handlePasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      await changePassword(passwordForm.currentPassword, passwordForm.newPassword)
+      clearSessionToken()
+      setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
+      setData(null)
+      setOwnerData(null)
+      setPasswordForm({ currentPassword: '', newPassword: '' })
+      setAuthError('La contrasena fue actualizada. Inicia sesion otra vez con tu usuario en este equipo.')
+    } catch (passwordError) {
+      setError(resolveErrorMessage(passwordError, 'No se pudo actualizar la contrasena.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    setSaving(true)
+    try {
+      await logout()
+    } catch {
+      clearSessionToken()
+    } finally {
+      setAuthStatus((current) => ({ authenticated: false, has_users: current?.has_users ?? true, admin_bootstrap_required: current?.admin_bootstrap_required ?? false, admin_bootstrap_code_path: current?.admin_bootstrap_code_path ?? null, setup_complete: current?.setup_complete ?? false, username: current?.username ?? null, role: current?.role ?? null, can_edit_data: current?.can_edit_data ?? false, can_manage_users: current?.can_manage_users ?? false }))
+      setData(null)
+      setOwnerData(null)
+      setSaving(false)
+    }
+  }
+
+  if (loading && authStatus === null) {
+    return <div className="screen-state">Cargando acceso seguro...</div>
+  }
+
+  if (!authStatus?.authenticated) {
+    return (
+      <LoginGate
+        ownerMode={isOwnerRoute}
+        authStatus={authStatus}
+        error={authError}
+        busy={loading}
+        onLogin={async (username, password, bootstrapCode) => {
+          setAuthError(null)
+          setLoading(true)
+          try {
+            const deviceName = typeof navigator === 'undefined' ? 'Navegador local' : `${navigator.platform || 'PC'} · navegador local`
+            const response = isOwnerRoute
+              ? authStatus?.admin_bootstrap_required
+                ? await bootstrapOwner(username, password, bootstrapCode ?? '', deviceName)
+                : await loginOwner(username, password, deviceName)
+              : authStatus?.admin_bootstrap_required
+                ? await bootstrapAdmin(username, password, bootstrapCode ?? '', deviceName)
+                : await login(username, password, deviceName)
+            await refreshAfterAuth(response)
+          } catch (loginError) {
+            setAuthError(resolveErrorMessage(loginError, 'No se pudo iniciar sesion.'))
+          } finally {
+            setLoading(false)
+          }
+        }}
+      />
+    )
+  }
+
+  if (loading && !data) {
+    return <div className="screen-state">Cargando tablero financiero...</div>
+  }
+
+  if (!data) {
+    if (isOwnerRoute && ownerData) {
+      return (
+        <OwnerPanel
+          data={ownerData}
+          saving={saving}
+          error={error}
+          userForm={userForm}
+          setUserForm={setUserForm}
+          onUserSubmit={handleUserSubmit}
+          onUpdateUserAccess={handleUserAccessUpdate}
+          onDeleteUser={(userId, username) => void handleUserDelete(userId, username)}
+          onLogout={() => void handleLogout()}
+        />
+      )
+    }
+    return <div className="screen-state error">{error ?? 'No se pudo iniciar la aplicacion.'}</div>
+  }
+
+  if (isOwnerRoute) {
+    return ownerData ? (
+      <OwnerPanel
+        data={ownerData}
+        saving={saving}
+        error={error}
+        userForm={userForm}
+        setUserForm={setUserForm}
+        onUserSubmit={handleUserSubmit}
+        onUpdateUserAccess={handleUserAccessUpdate}
+        onDeleteUser={(userId, username) => void handleUserDelete(userId, username)}
+        onLogout={() => void handleLogout()}
+      />
+    ) : <div className="screen-state error">{error ?? 'No se pudo iniciar el panel owner.'}</div>
+  }
+
+  const categoriesForTransactionKind = transactionForm.kind === 'ingreso' ? incomeCategories : expenseCategories
+
+  return data.setup_complete ? (
+    <main className={`app-shell app-shell-${activeTab}`}>
+      <section className="hero-panel">
+        <div>
+          <BrandLogo className="brand-hero-logo" />
+          <h1>Tu tablero financiero</h1>
+          <div className="hero-meta">
+            <span>Cuenta <strong>{data.current_username}</strong></span>
+            <span>{roleLabels[data.current_user_role]}</span>
+          </div>
+        </div>
+        <div className="hero-card">
+          <BrandLogo dark markOnly className="brand-mark brand-mark-on-dark" />
+          <span>Disponible personal</span>
+          <strong>{currency(data.dashboard.safe_personal_available)}</strong>
+          <p>{currency(data.dashboard.income_reported_this_month)} reportados de {currency(data.dashboard.fixed_income_expected)} esperados.</p>
+          <div className="action-row top-gap">
+            <button type="button" className="ghost light" onClick={() => void handleLogout()}>Cerrar sesion</button>
+          </div>
+        </div>
+      </section>
+
+      <HelpDock />
+
+      {error ? <div className="banner error">{error}</div> : null}
+
+      <nav className="tab-rail" aria-label="Secciones principales">
+        {appTabs.map((tab) => (
+          <button key={tab.id} type="button" className={activeTab === tab.id ? 'tab-chip active' : 'tab-chip'} onClick={() => setActiveTab(tab.id)}>
+            <div className="tab-chip-top"><strong>{tab.label}</strong></div>
+          </button>
+        ))}
+      </nav>
+
+      {activeTab === 'dashboard' ? <DashboardTab data={data} /> : null}
+      {activeTab === 'transactions' ? (
+        <TransactionsTab
+          data={data}
+          canEditData={canEditData}
+          saving={saving}
+          editingTransactionId={editingTransactionId}
+          transactionForm={transactionForm}
+          setTransactionForm={setTransactionForm}
+          categoriesForTransactionKind={categoriesForTransactionKind}
+          suggestion={suggestion}
+          onSubmit={handleTransactionSubmit}
+          onEdit={(transaction) => {
+            setEditingTransactionId(transaction.id)
+            setTransactionForm({ ...transaction, date: formatDateInput(transaction.date) })
+          }}
+          onDelete={async (id) => {
+            await deleteTransaction(id)
+            await load()
+          }}
+          onCancelEdit={() => {
+            setEditingTransactionId(null)
+            setTransactionForm(emptyTransaction(defaultWallet, defaultIncomeCategory))
+          }}
+        />
+      ) : null}
+      {activeTab === 'base' ? (
+        <BaseTab
+          data={data}
+          canEditData={canEditData}
+          saving={saving}
+          fixedIncomeForm={fixedIncomeForm}
+          setFixedIncomeForm={setFixedIncomeForm}
+          obligationForm={obligationForm}
+          setObligationForm={setObligationForm}
+          editingFixedIncomeId={editingFixedIncomeId}
+          editingObligationId={editingObligationId}
+          expenseCategories={expenseCategories}
+          onFixedIncomeSubmit={handleFixedIncomeSubmit}
+          onObligationSubmit={handleObligationSubmit}
+          onEditFixedIncome={(item) => {
+            setEditingFixedIncomeId(item.id)
+            setFixedIncomeForm({ ...item })
+          }}
+          onEditObligation={(item) => {
+            setEditingObligationId(item.id)
+            setObligationForm({ ...item })
+          }}
+          onDeleteFixedIncome={async (id) => {
+            await deleteFixedIncomeSource(id)
+            await load()
+          }}
+          onDeleteObligation={async (id) => {
+            await deleteObligation(id)
+            await load()
+          }}
+        />
+      ) : null}
+      {activeTab === 'settings' ? (
+        <SettingsTab
+          data={data}
+          canEditData={canEditData}
+          saving={saving}
+          importing={importing}
+          selectedTheme={selectedTheme}
+          onThemeSelect={async (themeId) => {
+            setSelectedTheme(themeId)
+            await updateThemePreference(themeId)
+            setData((current) => (current ? { ...current, theme_id: themeId } : current))
+          }}
+          passwordForm={passwordForm}
+          setPasswordForm={setPasswordForm}
+          categoryForm={categoryForm}
+          setCategoryForm={setCategoryForm}
+          tagForm={tagForm}
+          setTagForm={setTagForm}
+          editingCategoryId={editingCategoryId}
+          editingTagId={editingTagId}
+          importResult={importResult}
+          onPasswordSubmit={handlePasswordSubmit}
+          onLogout={() => void handleLogout()}
+          onCategorySubmit={handleCategorySubmit}
+          onTagSubmit={handleTagSubmit}
+          onEditCategory={(category) => {
+            setEditingCategoryId(category.id)
+            setCategoryForm({ ...category })
+          }}
+          onEditTag={(tag) => {
+            setEditingTagId(tag.id)
+            setTagForm({ ...tag })
+          }}
+          onToggleCategory={async (category) => {
+            await upsertCategory({ ...category, active: !category.active })
+            await load()
+          }}
+          onToggleTag={async (tag) => {
+            await upsertTag({ ...tag, active: !tag.active })
+            await load()
+          }}
+          onDeleteCategory={async (category) => {
+            const confirmed = window.confirm(`Se eliminara la categoria ${category.label}. Las obligaciones asociadas quedaran sin categoria.\n\n¿Deseas continuar?`)
+            if (!confirmed) {
+              return
+            }
+            await deleteCategory(category.id)
+            if (editingCategoryId === category.id) {
+              setEditingCategoryId(null)
+              setCategoryForm(emptyCategory())
+            }
+            await load()
+          }}
+          onDeleteTag={async (tag) => {
+            const confirmed = window.confirm(`Se eliminara el tag ${tag.label}.\n\n¿Deseas continuar?`)
+            if (!confirmed) {
+              return
+            }
+            await deleteTag(tag.id)
+            if (editingTagId === tag.id) {
+              setEditingTagId(null)
+              setTagForm(emptyTag())
+            }
+            await load()
+          }}
+          onImportFileChange={setImportFile}
+          onImport={() => void handleImport()}
+          onReset={() => void handleReset()}
+          resetCategoryForm={() => {
+            setEditingCategoryId(null)
+            setCategoryForm(emptyCategory())
+          }}
+          resetTagForm={() => {
+            setEditingTagId(null)
+            setTagForm(emptyTag())
+          }}
+        />
+      ) : null}
+    </main>
+  ) : (
+    <SetupWizard
+      wallets={data.wallets}
+      expenseCategories={expenseCategories}
+      canEditData={canEditData}
+      saving={saving}
+      onLogout={() => void handleLogout()}
+      onActivate={async (payload) => {
+        setSaving(true)
+        try {
+          const response = await completeInitialSetup(payload)
+          setData(response)
+          setActiveTab('dashboard')
+          setTransactionForm(emptyTransaction(defaultWallet, defaultIncomeCategory))
+          setFixedIncomeForm(emptyFixedIncome(defaultWallet))
+          setObligationForm(emptyObligation(defaultExpenseCategoryId))
+        } finally {
+          setSaving(false)
+        }
+      }}
+    />
+  )
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return <article className="metric-card"><span className="metric-kicker">{label}</span><strong>{value}</strong></article>
+}
+
+function Panel({ title, subtitle, className = '', children }: { title: string; subtitle?: string; className?: string; children: ReactNode }) {
+  return <section className={`panel ${className}`.trim()}><header className="panel-head"><div className="panel-title-wrap"><span className="panel-orb" /><div><h2>{title}</h2>{subtitle ? <p>{subtitle}</p> : null}</div></div></header>{children}</section>
+}
+
+function HelpDock({ compact = false }: { compact?: boolean }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <button type="button" className={compact ? 'help-fab compact' : 'help-fab'} onClick={() => setOpen(true)} aria-label="Abrir ayuda">
+        <span className="help-fab-mark">?</span>
+        {compact ? null : <span>Ayuda</span>}
+      </button>
+      {open ? (
+        <div className="help-backdrop" role="dialog" aria-modal="true" aria-label="Centro de ayuda" onClick={() => setOpen(false)}>
+          <section className="help-card" onClick={(event) => event.stopPropagation()}>
+            <header className="help-head">
+              <div className="help-brand-lockup">
+                <BrandLogo markOnly className="help-brand-mark" />
+                <div>
+                  <p className="eyebrow">Centro de ayuda</p>
+                  <h2>Gride Ledger</h2>
+                </div>
+              </div>
+              <button type="button" className="ghost" onClick={() => setOpen(false)}>Cerrar</button>
+            </header>
+            <div className="help-grid">
+              {helpSections.map((section) => (
+                <article key={section.title} className="help-section">
+                  <strong>{section.title}</strong>
+                  <ul>
+                    {section.items.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+function DashboardTab({ data }: { data: BootstrapResponse }) {
+  return (
+    <>
+      <section className="stats-grid stats-grid-4">
+        <MetricCard label="Gasto del mes" value={currency(data.dashboard.current_month_expense_total)} />
+        <MetricCard label="Meta quincenal" value={currency(data.dashboard.reserve_per_quincena)} />
+        <MetricCard label="Ingreso faltante" value={currency(data.dashboard.income_gap)} />
+        <MetricCard label="Cobertura" value={`${Math.round(data.dashboard.quincena_coverage * 100)}%`} />
+      </section>
+      <section className="bottom-grid">
+        <Panel title="Pastel de gastos" subtitle="Distribucion mensual.">
+          <ExpensePieChart comparisons={data.dashboard.expense_comparisons} />
+        </Panel>
+        <Panel title="Buckets del mes" subtitle="Reservas vs objetivo.">
+          <div className="progress-stack">
+            {data.dashboard.bucket_overviews.map((bucket) => {
+              const ratio = bucket.total === 0 ? 0 : Math.min(bucket.reserved / bucket.total, 1)
+              return (
+                <div key={bucket.label} className="progress-card">
+                  <div className="progress-head"><strong>{bucket.label}</strong><span>{Math.round(ratio * 100)}%</span></div>
+                  <div className="progress-bar"><div style={{ width: `${ratio * 100}%` }} /></div>
+                  <small>{currency(bucket.reserved)} de {currency(bucket.total)}</small>
+                </div>
+              )
+            })}
+          </div>
+        </Panel>
+      </section>
+      <section className="bottom-grid single-wide">
+        <Panel title="Insights">
+          <div className="insight-grid">
+            {data.dashboard.generated_insights.map((insight, index) => {
+              const tone = insightTone(insight, index)
+
+              return (
+                <article key={insight.title} className={`insight-card insight-${tone.className}`}>
+                  <div className="insight-top">
+                    <span className={`insight-badge ${tone.className}`}>{tone.label}</span>
+                    <strong>{insight.title}</strong>
+                  </div>
+                  <p>{compactInsightBody(insight.body)}</p>
+                </article>
+              )
+            })}
+          </div>
+        </Panel>
+      </section>
+    </>
+  )
+}
+
+function TransactionsTab({
+  data,
+  canEditData,
+  saving,
+  editingTransactionId,
+  transactionForm,
+  setTransactionForm,
+  categoriesForTransactionKind,
+  suggestion,
+  onSubmit,
+  onEdit,
+  onDelete,
+  onCancelEdit,
+}: {
+  data: BootstrapResponse
+  canEditData: boolean
+  saving: boolean
+  editingTransactionId: number | null
+  transactionForm: TransactionInput
+  setTransactionForm: Dispatch<SetStateAction<TransactionInput>>
+  categoriesForTransactionKind: CategoryConfig[]
+  suggestion: AllocationSuggestion | null
+  onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onEdit: (transaction: Transaction) => void
+  onDelete: (id: number) => Promise<void>
+  onCancelEdit: () => void
+}) {
+  const tagsByLabel = new Map(data.tags.map((tag) => [tag.label, tag]))
+
+  return (
+    <section className="content-grid single-focus">
+      {!canEditData ? <div className="banner">Tu perfil es de consulta. Puedes revisar el historial, pero no registrar ni editar movimientos.</div> : null}
+      <Panel title={editingTransactionId ? 'Editar movimiento' : 'Registrar movimiento'} className={`transaction-panel kind-${transactionForm.kind}`}>
+        <div className={`form-live-banner kind-${transactionForm.kind}`}>
+          <div>
+            <strong>{transactionKindLabels[transactionForm.kind]} · {currency(transactionForm.amount || 0)}</strong>
+            <p>{editingTransactionId ? 'Modo edicion activo.' : 'Nuevo registro en curso.'}</p>
+          </div>
+          <small>{transactionForm.wallet || 'Banco'} · {transactionForm.category || 'Categoria pendiente'}</small>
+        </div>
+        <form className="form-grid dynamic-form" onSubmit={onSubmit}>
+          <div className="span-2 form-kind-block">
+            <small>Tipo de movimiento</small>
+            <div className="kind-chip-row">
+              {(Object.keys(transactionKindLabels) as TransactionKind[]).map((kind) => (
+                <button key={kind} type="button" className={transactionForm.kind === kind ? 'kind-chip active' : 'kind-chip'} onClick={() => setTransactionForm((current) => ({ ...current, kind, category: '' }))}>
+                  <strong>{transactionKindLabels[kind]}</strong>
+                </button>
+              ))}
+            </div>
+          </div>
+          <label>
+            Monto
+            <input type="number" min="0" step="0.01" value={transactionForm.amount || ''} onChange={(event) => setTransactionForm((current) => ({ ...current, amount: Number(event.target.value) }))} />
+          </label>
+          <label>
+            Cartera
+            <select value={transactionForm.wallet} onChange={(event) => setTransactionForm((current) => ({ ...current, wallet: event.target.value }))}>
+              {data.wallets.map((wallet) => <option key={wallet} value={wallet}>{wallet}</option>)}
+            </select>
+          </label>
+          <label>
+            Categoria
+            <select value={transactionForm.category} onChange={(event) => setTransactionForm((current) => ({ ...current, category: event.target.value }))}>
+              <option value="">Selecciona una categoria</option>
+              {categoriesForTransactionKind.map((category) => <option key={category.id} value={category.label}>{category.label}</option>)}
+            </select>
+          </label>
+          <label>
+            Fecha
+            <input type="datetime-local" value={transactionForm.date} onChange={(event) => setTransactionForm((current) => ({ ...current, date: event.target.value }))} />
+          </label>
+          <label className="span-2">
+            Notas
+            <textarea rows={3} value={transactionForm.notes} onChange={(event) => setTransactionForm((current) => ({ ...current, notes: event.target.value }))} />
+          </label>
+          <div className="span-2 tag-wrap">
+            {data.tags.map((tag) => {
+              const selected = transactionForm.tags.includes(tag.label)
+              return (
+                <button key={tag.id} type="button" className={selected ? 'tag active' : 'tag'} onClick={() => setTransactionForm((current) => ({ ...current, tags: selected ? current.tags.filter((item) => item !== tag.label) : [...current.tags, tag.label] }))}>
+                  {tag.label}
+                </button>
+              )
+            })}
+          </div>
+          <label className="span-2 checkbox-row">
+            <input type="checkbox" checked={transactionForm.recurring} onChange={(event) => setTransactionForm((current) => ({ ...current, recurring: event.target.checked }))} />
+            Recurrente
+          </label>
+          <div className="span-2 action-row">
+            <button type="submit" disabled={saving || !canEditData}>{editingTransactionId ? 'Guardar cambios' : 'Registrar movimiento'}</button>
+            {editingTransactionId ? <button type="button" className="ghost" onClick={onCancelEdit}>Cancelar</button> : null}
+          </div>
+        </form>
+        {transactionForm.kind === 'ingreso' && suggestion ? (
+          <div className="suggestion-card">
+            <h3>Sugerencia</h3>
+            <div className="suggestion-grid">
+              <span>Obligaciones</span><strong>{currency(suggestion.for_obligations)}</strong>
+              <span>Metas</span><strong>{currency(suggestion.for_goals)}</strong>
+              <span>Disponible personal</span><strong>{currency(suggestion.for_personal)}</strong>
+            </div>
+          </div>
+        ) : null}
+      </Panel>
+      <Panel title="Historial">
+        <div className="list-stack">
+          {data.transactions.map((transaction) => (
+            <article key={transaction.id} className="list-card" >
+              <div className="list-leading list-leading-top">
+                {(() => {
+                  const category = findCategoryByLabel(data.categories, transaction.category, transaction.kind === 'ingreso' ? 'income' : 'expense')
+                  const fallbackColor = transaction.kind === 'ingreso' ? 'emerald' : transaction.kind === 'transferencia' ? 'sky' : 'terracotta'
+                  const fallbackIcon = transaction.kind === 'ingreso' ? 'paid' : transaction.kind === 'transferencia' ? 'account_balance' : transaction.kind === 'ahorro' ? 'savings' : transaction.kind === 'inversion' ? 'trending' : 'receipt'
+                  return <VisualBadge iconToken={category?.icon_token ?? fallbackIcon} colorToken={category?.color_token ?? fallbackColor} />
+                })()}
+                <div>
+                  <strong>{transaction.category}</strong>
+                  <p>{transaction.kind} · {transaction.wallet} · {new Date(transaction.date).toLocaleString()}</p>
+                  {transaction.tags.length > 0 ? (
+                    <div className="history-tag-row">
+                      {transaction.tags.map((label) => {
+                        const tag = tagsByLabel.get(label)
+                        return <TagPill key={label} label={label} colorToken={tag?.color_token ?? 'sage'} />
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+                {transaction.notes ? <small>{transaction.notes}</small> : null}
+              </div>
+              <div className="list-actions">
+                <span className={transaction.kind === 'ingreso' ? 'amount positive' : 'amount negative'}>{currency(transaction.amount)}</span>
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEdit(transaction)}>Editar</button>
+                <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDelete(transaction.id)}>Borrar</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </Panel>
+    </section>
+  )
+}
+
+function BaseTab({
+  data,
+  canEditData,
+  saving,
+  fixedIncomeForm,
+  setFixedIncomeForm,
+  obligationForm,
+  setObligationForm,
+  editingFixedIncomeId,
+  editingObligationId,
+  expenseCategories,
+  onFixedIncomeSubmit,
+  onObligationSubmit,
+  onEditFixedIncome,
+  onEditObligation,
+  onDeleteFixedIncome,
+  onDeleteObligation,
+}: {
+  data: BootstrapResponse
+  canEditData: boolean
+  saving: boolean
+  fixedIncomeForm: FixedIncomeSourceInput
+  setFixedIncomeForm: Dispatch<SetStateAction<FixedIncomeSourceInput>>
+  obligationForm: ObligationInput
+  setObligationForm: Dispatch<SetStateAction<ObligationInput>>
+  editingFixedIncomeId: number | null
+  editingObligationId: number | null
+  expenseCategories: CategoryConfig[]
+  onFixedIncomeSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onObligationSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onEditFixedIncome: (item: FixedIncomeSource) => void
+  onEditObligation: (item: Obligation) => void
+  onDeleteFixedIncome: (id: number) => Promise<void>
+  onDeleteObligation: (id: number) => Promise<void>
+}) {
+  const incomeWallets = new Map(data.wallets.map((wallet) => [wallet, walletVisual(wallet)]))
+
+  return (
+    <section className="content-grid">
+      {!canEditData ? <div className="banner">Tu perfil es de consulta. La base financiera queda bloqueada para cambios.</div> : null}
+      <Panel title="Ingresos fijos" subtitle="Base mensual.">
+        <form className="form-grid dynamic-form compact" onSubmit={onFixedIncomeSubmit}>
+          <label>
+            Etiqueta
+            <input value={fixedIncomeForm.label} onChange={(event) => setFixedIncomeForm((current) => ({ ...current, label: event.target.value }))} />
+          </label>
+          <label>
+            Monto
+            <input type="number" min="0" step="0.01" value={fixedIncomeForm.amount || ''} onChange={(event) => setFixedIncomeForm((current) => ({ ...current, amount: Number(event.target.value) }))} />
+          </label>
+          <label>
+            Frecuencia
+            <select value={fixedIncomeForm.cadence} onChange={(event) => setFixedIncomeForm((current) => ({ ...current, cadence: event.target.value as FixedIncomeSourceInput['cadence'] }))}>
+              <option value="monthly">Mensual</option>
+              <option value="biweekly">Quincenal</option>
+              <option value="weekly">Semanal</option>
+            </select>
+          </label>
+          <label>
+            Dia esperado
+            <input type="number" min="1" max="31" value={fixedIncomeForm.expected_day} onChange={(event) => setFixedIncomeForm((current) => ({ ...current, expected_day: Number(event.target.value) }))} />
+          </label>
+          <label>
+            Cartera
+            <select value={fixedIncomeForm.wallet} onChange={(event) => setFixedIncomeForm((current) => ({ ...current, wallet: event.target.value }))}>
+              {data.wallets.map((wallet) => <option key={wallet} value={wallet}>{wallet}</option>)}
+            </select>
+          </label>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={fixedIncomeForm.active} onChange={(event) => setFixedIncomeForm((current) => ({ ...current, active: event.target.checked }))} /> Activo
+          </label>
+          <div className="span-2 action-row">
+            <button type="submit" disabled={saving || !canEditData}>{editingFixedIncomeId ? 'Actualizar ingreso fijo' : 'Agregar ingreso fijo'}</button>
+          </div>
+        </form>
+        <div className="list-stack">
+          {data.fixed_income_sources.map((item) => (
+            <article key={item.id} className="list-card">
+              <div className="list-leading list-leading-top">
+                <VisualBadge iconToken={incomeWallets.get(item.wallet)?.icon ?? 'briefcase'} colorToken={incomeWallets.get(item.wallet)?.color ?? 'sky'} />
+                <div>
+                  <strong>{item.label}</strong>
+                  <p>{item.cadence} · {item.wallet} · dia {item.expected_day}</p>
+                </div>
+              </div>
+              <div className="list-actions">
+                <span className="amount positive">{currency(item.amount)}</span>
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEditFixedIncome(item)}>Editar</button>
+                <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDeleteFixedIncome(item.id)}>Borrar</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="Gastos fijos" subtitle="Compromisos recurrentes.">
+        <form className="form-grid dynamic-form compact" onSubmit={onObligationSubmit}>
+          <label>
+            Etiqueta
+            <input value={obligationForm.label} onChange={(event) => setObligationForm((current) => ({ ...current, label: event.target.value }))} />
+          </label>
+          <label>
+            Monto
+            <input type="number" min="0" step="0.01" value={obligationForm.amount || ''} onChange={(event) => setObligationForm((current) => ({ ...current, amount: Number(event.target.value) }))} />
+          </label>
+          <label>
+            Categoria
+            <select value={obligationForm.category_id ?? ''} onChange={(event) => setObligationForm((current) => ({ ...current, category_id: event.target.value }))}>
+              {expenseCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}
+            </select>
+          </label>
+          <label>
+            Frecuencia
+            <select value={obligationForm.cadence} onChange={(event) => setObligationForm((current) => ({ ...current, cadence: event.target.value as ObligationInput['cadence'] }))}>
+              <option value="monthly">Mensual</option>
+              <option value="biweekly">Quincenal</option>
+              <option value="weekly">Semanal</option>
+            </select>
+          </label>
+          <label>
+            Dia de vencimiento
+            <input type="number" min="1" max="31" value={obligationForm.due_day} onChange={(event) => setObligationForm((current) => ({ ...current, due_day: Number(event.target.value) }))} />
+          </label>
+          <label>
+            Estado
+            <select value={obligationForm.status} onChange={(event) => setObligationForm((current) => ({ ...current, status: event.target.value }))}>
+              <option value="Pendiente">Pendiente</option>
+              <option value="Parcial">Parcial</option>
+              <option value="Cubierto">Cubierto</option>
+            </select>
+          </label>
+          <div className="span-2 action-row">
+            <button type="submit" disabled={saving || !canEditData}>{editingObligationId ? 'Actualizar gasto fijo' : 'Agregar gasto fijo'}</button>
+          </div>
+        </form>
+        <div className="list-stack">
+          {data.obligations.map((item) => (
+            <article key={item.id} className="list-card">
+              <div className="list-leading list-leading-top">
+                {(() => {
+                  const category = data.categories.find((categoryItem) => categoryItem.id === item.category_id)
+                  return <VisualBadge iconToken={category?.icon_token ?? 'receipt'} colorToken={category?.color_token ?? 'gold'} />
+                })()}
+                <div>
+                  <strong>{item.label}</strong>
+                  <p>{item.status} · {item.cadence} · dia {item.due_day}</p>
+                </div>
+              </div>
+              <div className="list-actions">
+                <span className="amount neutral">{currency(item.amount)}</span>
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEditObligation(item)}>Editar</button>
+                <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDeleteObligation(item.id)}>Borrar</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </Panel>
+    </section>
+  )
+}
+
+function SettingsTab({
+  data,
+  canEditData,
+  saving,
+  importing,
+  selectedTheme,
+  onThemeSelect,
+  passwordForm,
+  setPasswordForm,
+  categoryForm,
+  setCategoryForm,
+  tagForm,
+  setTagForm,
+  editingCategoryId,
+  editingTagId,
+  importResult,
+  onPasswordSubmit,
+  onLogout,
+  onCategorySubmit,
+  onTagSubmit,
+  onEditCategory,
+  onEditTag,
+  onToggleCategory,
+  onToggleTag,
+  onDeleteCategory,
+  onDeleteTag,
+  onImportFileChange,
+  onImport,
+  onReset,
+  resetCategoryForm,
+  resetTagForm,
+}: {
+  data: BootstrapResponse
+  canEditData: boolean
+  saving: boolean
+  importing: boolean
+  selectedTheme: string
+  onThemeSelect: (themeId: string) => Promise<void>
+  passwordForm: { currentPassword: string; newPassword: string }
+  setPasswordForm: Dispatch<SetStateAction<{ currentPassword: string; newPassword: string }>>
+  categoryForm: CategoryConfigInput
+  setCategoryForm: Dispatch<SetStateAction<CategoryConfigInput>>
+  tagForm: TagConfigInput
+  setTagForm: Dispatch<SetStateAction<TagConfigInput>>
+  editingCategoryId: string | null
+  editingTagId: string | null
+  importResult: FlutterImportSummary | null
+  onPasswordSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onLogout: () => void
+  onCategorySubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onTagSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onEditCategory: (category: CategoryConfig) => void
+  onEditTag: (tag: TagConfig) => void
+  onToggleCategory: (category: CategoryConfig) => Promise<void>
+  onToggleTag: (tag: TagConfig) => Promise<void>
+  onDeleteCategory: (category: CategoryConfig) => Promise<void>
+  onDeleteTag: (tag: TagConfig) => Promise<void>
+  onImportFileChange: (file: File | null) => void
+  onImport: () => void
+  onReset: () => void
+  resetCategoryForm: () => void
+  resetTagForm: () => void
+}) {
+  return (
+    <section className="settings-grid">
+      <Panel title="Paletas">
+        <div className="theme-grid">
+          {palettes.map((palette) => (
+            <button key={palette.id} type="button" className={selectedTheme === palette.id ? 'theme-card active' : 'theme-card'} onClick={() => void onThemeSelect(palette.id)}>
+              <div className="theme-swatches">
+                <span style={{ background: palette.petrol }} />
+                <span style={{ background: palette.gold }} />
+                <span style={{ background: palette.sky }} />
+                <span style={{ background: palette.terracotta }} />
+              </div>
+              <strong>{palette.name}</strong>
+            </button>
+          ))}
+        </div>
+      </Panel>
+
+      <Panel title="Seguridad" subtitle={`Cuenta activa: ${data.current_username}`}>
+        <form className="form-grid dynamic-form compact" onSubmit={onPasswordSubmit}>
+          <label>
+            Contrasena actual
+            <input type="password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm((current) => ({ ...current, currentPassword: event.target.value }))} />
+          </label>
+          <label>
+            Nueva contrasena
+            <input type="password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm((current) => ({ ...current, newPassword: event.target.value }))} />
+          </label>
+          <div className="span-2 action-row">
+            <button type="submit" disabled={saving}>Actualizar contrasena</button>
+            <button type="button" className="ghost" onClick={onLogout}>Cerrar sesion en esta PC</button>
+          </div>
+        </form>
+      </Panel>
+
+      <Panel title="Categorias" subtitle="Catalogo editable.">
+        {!canEditData ? <p className="read-only-note">Solo lectura para esta cuenta.</p> : null}
+        <form className="form-grid dynamic-form compact" onSubmit={onCategorySubmit}>
+          <label>
+            Nombre
+            <input value={categoryForm.label} onChange={(event) => setCategoryForm((current) => ({ ...current, label: event.target.value }))} />
+          </label>
+          <label>
+            Id tecnico
+            <input value={categoryForm.id} onChange={(event) => setCategoryForm((current) => ({ ...current, id: slugify(event.target.value) }))} placeholder="Se genera desde el nombre si lo dejas vacio" />
+          </label>
+          <label>
+            Alcance
+            <select value={categoryForm.scope} onChange={(event) => setCategoryForm((current) => ({ ...current, scope: event.target.value as CategoryConfig['scope'], type: event.target.value === 'income' ? 'Ingreso' : current.type }))}>
+              <option value="expense">Gasto</option>
+              <option value="income">Ingreso</option>
+            </select>
+          </label>
+          <label>
+            Tipo
+            <input value={categoryForm.type} onChange={(event) => setCategoryForm((current) => ({ ...current, type: event.target.value }))} disabled={categoryForm.scope === 'income'} />
+          </label>
+          <label className="span-2">
+            Icono
+            <div className="picker-grid icon-picker">
+              {iconTokens.map((token) => (
+                <button key={token} type="button" className={categoryForm.icon_token === token ? 'picker-chip active' : 'picker-chip'} onClick={() => setCategoryForm((current) => ({ ...current, icon_token: token }))}>
+                  <span>{iconGlyph(token)}</span>
+                  <small>{token}</small>
+                </button>
+              ))}
+            </div>
+          </label>
+          <label className="span-2">
+            Color
+            <div className="picker-grid color-picker">
+              {colorTokens.map((token) => (
+                <button key={token} type="button" className={categoryForm.color_token === token ? 'picker-chip active' : 'picker-chip'} onClick={() => setCategoryForm((current) => ({ ...current, color_token: token }))}>
+                  <span className="color-dot" style={{ background: tokenColor(token) }} />
+                  <small>{token}</small>
+                </button>
+              ))}
+            </div>
+          </label>
+          <label className="checkbox-row span-2">
+            <input type="checkbox" checked={categoryForm.active} onChange={(event) => setCategoryForm((current) => ({ ...current, active: event.target.checked }))} /> Activa
+          </label>
+          <div className="span-2 action-row">
+            <button type="submit" disabled={saving || !canEditData}>{editingCategoryId ? 'Actualizar categoria' : 'Agregar categoria'}</button>
+            {editingCategoryId ? <button type="button" className="ghost" onClick={resetCategoryForm}>Cancelar</button> : null}
+          </div>
+        </form>
+        <div className="list-stack">
+          {data.categories.map((category) => (
+            <article key={category.id} className="list-card">
+              <div className="list-leading">
+                <span className="icon-badge" style={{ background: `${tokenColor(category.color_token)}22`, color: tokenColor(category.color_token) }}>{iconGlyph(category.icon_token)}</span>
+                <div>
+                  <strong>{category.label}</strong>
+                  <p>{category.scope} · {category.type} · {category.active ? 'activa' : 'oculta'}</p>
+                </div>
+              </div>
+              <div className="list-actions">
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEditCategory(category)}>Editar</button>
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => void onToggleCategory(category)}>{category.active ? 'Ocultar' : 'Activar'}</button>
+                <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDeleteCategory(category)}>Eliminar</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </Panel>
+
+      <Panel title="Tags" subtitle="Etiquetas rapidas.">
+        {!canEditData ? <p className="read-only-note">Solo lectura para esta cuenta.</p> : null}
+        <form className="form-grid dynamic-form compact" onSubmit={onTagSubmit}>
+          <label>
+            Nombre
+            <input value={tagForm.label} onChange={(event) => setTagForm((current) => ({ ...current, label: event.target.value }))} />
+          </label>
+          <label>
+            Id tecnico
+            <input value={tagForm.id} onChange={(event) => setTagForm((current) => ({ ...current, id: slugify(event.target.value) }))} placeholder="Se genera desde el nombre si lo dejas vacio" />
+          </label>
+          <label className="span-2">
+            Color
+            <div className="picker-grid color-picker">
+              {colorTokens.map((token) => (
+                <button key={token} type="button" className={tagForm.color_token === token ? 'picker-chip active' : 'picker-chip'} onClick={() => setTagForm((current) => ({ ...current, color_token: token }))}>
+                  <span className="color-dot" style={{ background: tokenColor(token) }} />
+                  <small>{token}</small>
+                </button>
+              ))}
+            </div>
+          </label>
+          <label className="checkbox-row span-2">
+            <input type="checkbox" checked={tagForm.active} onChange={(event) => setTagForm((current) => ({ ...current, active: event.target.checked }))} /> Activo
+          </label>
+          <div className="span-2 action-row">
+            <button type="submit" disabled={saving || !canEditData}>{editingTagId ? 'Actualizar tag' : 'Agregar tag'}</button>
+            {editingTagId ? <button type="button" className="ghost" onClick={resetTagForm}>Cancelar</button> : null}
+          </div>
+        </form>
+        <div className="list-stack">
+          {data.tags.map((tag) => (
+            <article key={tag.id} className="list-card">
+              <div className="list-leading">
+                <span className="icon-badge narrow" style={{ background: `${tokenColor(tag.color_token)}22`, color: tokenColor(tag.color_token) }}>#</span>
+                <div>
+                  <strong>{tag.label}</strong>
+                  <p>{tag.active ? 'activo' : 'oculto'} · {tag.color_token}</p>
+                </div>
+              </div>
+              <div className="list-actions">
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEditTag(tag)}>Editar</button>
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => void onToggleTag(tag)}>{tag.active ? 'Ocultar' : 'Activar'}</button>
+                <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDeleteTag(tag)}>Eliminar</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </Panel>
+
+      <Panel title="Migracion y reset" subtitle="Importacion y reinicio.">
+        <div className="column-stack">
+          {!canEditData ? <p className="read-only-note">La importacion y el reinicio requieren una cuenta con permiso de edicion.</p> : null}
+          <label>
+            Archivo SQLite legado
+            <input type="file" accept=".db,.sqlite,.sqlite3" onChange={(event) => onImportFileChange(event.target.files?.[0] ?? null)} />
+          </label>
+          <div className="action-row">
+            <button type="button" disabled={importing || !data || !canEditData} onClick={onImport}>{importing ? 'Importando...' : 'Importar base Flutter'}</button>
+            <button type="button" disabled={saving || !canEditData} className="ghost danger" onClick={onReset}>Reiniciar configuracion inicial</button>
+          </div>
+          <p>El importador conserva ingresos fijos, obligaciones, transacciones, categorias y tags del archivo legado.</p>
+          {importResult ? <div className="suggestion-card"><p>Importados {importResult.fixed_income_sources} ingresos fijos, {importResult.obligations} obligaciones y {importResult.transactions} movimientos.</p></div> : null}
+        </div>
+      </Panel>
+      <HelpDock />
+    </section>
+  )
+}
+
+function OwnerPanel({
+  data,
+  saving,
+  error,
+  userForm,
+  setUserForm,
+  onUserSubmit,
+  onUpdateUserAccess,
+  onDeleteUser,
+  onLogout,
+}: {
+  data: OwnerPanelResponse
+  saving: boolean
+  error: string | null
+  userForm: { username: string; password: string; role: UserRole }
+  setUserForm: Dispatch<SetStateAction<{ username: string; password: string; role: UserRole }>>
+  onUserSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onUpdateUserAccess: (userId: number, role: UserRole, active: boolean) => Promise<void>
+  onDeleteUser: (userId: number, username: string) => void
+  onLogout: () => void
+}) {
+  const [auditSearch, setAuditSearch] = useState('')
+  const [auditActionFilter, setAuditActionFilter] = useState('all')
+  const [auditPage, setAuditPage] = useState(1)
+  const auditPageSize = 6
+  const auditActionOptions = useMemo(() => Array.from(new Set(data.audit_events.map((item) => item.action))), [data.audit_events])
+  const filteredAuditEvents = useMemo(() => {
+    const query = auditSearch.trim().toLowerCase()
+    return data.audit_events.filter((item) => {
+      const matchesAction = auditActionFilter === 'all' || item.action === auditActionFilter
+      const haystack = `${item.actor_username} ${item.action} ${item.target_type} ${item.target_value} ${item.detail}`.toLowerCase()
+      const matchesQuery = query.length === 0 || haystack.includes(query)
+      return matchesAction && matchesQuery
+    })
+  }, [auditActionFilter, auditSearch, data.audit_events])
+  const auditTotalPages = Math.max(1, Math.ceil(filteredAuditEvents.length / auditPageSize))
+  const safeAuditPage = Math.min(auditPage, auditTotalPages)
+  const pagedAuditEvents = filteredAuditEvents.slice((safeAuditPage - 1) * auditPageSize, safeAuditPage * auditPageSize)
+
+  return (
+    <main className="app-shell owner-shell">
+      <section className="hero-panel owner-hero-panel">
+        <div>
+          <BrandLogo className="brand-hero-logo" />
+          <h1>Panel owner</h1>
+          <div className="hero-meta">
+            <span>Control maestro de accesos</span>
+            <span>{data.current_username}</span>
+          </div>
+        </div>
+        <div className="hero-card">
+          <BrandLogo dark markOnly className="brand-mark brand-mark-on-dark" />
+          <span>Ruta separada</span>
+          <strong>/owner</strong>
+          <p>Desde aqui creas, ajustas, desactivas y eliminas usuarios del producto.</p>
+          <div className="action-row top-gap">
+            <button type="button" className="ghost light" onClick={onLogout}>Cerrar sesion</button>
+          </div>
+        </div>
+      </section>
+
+      {error ? <div className="banner error">{error}</div> : null}
+
+      <section className="settings-grid owner-panel-grid">
+        <Panel title="Usuarios" subtitle="Accesos del equipo.">
+          <form className="form-grid dynamic-form compact" onSubmit={onUserSubmit}>
+            <label>
+              Usuario
+              <input value={userForm.username} onChange={(event) => setUserForm((current) => ({ ...current, username: event.target.value }))} minLength={3} />
+            </label>
+            <label>
+              Contrasena temporal
+              <input type="password" value={userForm.password} onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))} minLength={4} />
+            </label>
+            <label>
+              Rol
+              <select value={userForm.role} onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value as UserRole }))}>
+                <option value="operator">Operador</option>
+                <option value="viewer">Consulta</option>
+                <option value="admin">Administrador interno</option>
+              </select>
+            </label>
+            <div className="span-2 action-row">
+              <button type="submit" disabled={saving || userForm.username.trim().length < 3 || userForm.password.length < 4}>Crear usuario</button>
+            </div>
+          </form>
+          <div className="list-stack">
+            {data.users.map((item) => (
+              <article key={item.id} className="list-card">
+                <div>
+                  <strong>{item.username}</strong>
+                  <p>{roleLabels[item.role]} · {item.active ? 'activa' : 'desactivada'}{item.created_by_username ? ` · alta por ${item.created_by_username}` : ''}</p>
+                </div>
+                <div className="list-actions user-access-actions owner-user-actions">
+                  <select value={item.role} disabled={saving || item.username === data.current_username} onChange={(event) => void onUpdateUserAccess(item.id, event.target.value as UserRole, item.active)}>
+                    <option value="admin">Administrador interno</option>
+                    <option value="operator">Operador</option>
+                    <option value="viewer">Consulta</option>
+                  </select>
+                  <button type="button" className={item.active ? 'ghost danger' : 'ghost'} disabled={saving || item.username === data.current_username} onClick={() => void onUpdateUserAccess(item.id, item.role, !item.active)}>
+                    {item.active ? 'Desactivar' : 'Activar'}
+                  </button>
+                  <button type="button" className="ghost danger" disabled={saving || item.username === data.current_username} onClick={() => onDeleteUser(item.id, item.username)}>
+                    Eliminar
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel title="Auditoria" subtitle="Eventos recientes del owner.">
+          <div className="audit-toolbar">
+            <label>
+              Buscar
+              <input value={auditSearch} onChange={(event) => { setAuditSearch(event.target.value); setAuditPage(1) }} placeholder="usuario, accion o detalle" />
+            </label>
+            <label>
+              Tipo
+              <select value={auditActionFilter} onChange={(event) => { setAuditActionFilter(event.target.value); setAuditPage(1) }}>
+                <option value="all">Todos</option>
+                {auditActionOptions.map((action) => <option key={action} value={action}>{auditActionLabels[action] ?? action}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="list-stack">
+            {pagedAuditEvents.map((eventItem: AuditEvent) => (
+              <article key={eventItem.id} className="list-card audit-card">
+                <div>
+                  <strong>{auditActionLabels[eventItem.action] ?? eventItem.action}</strong>
+                  <p>{eventItem.actor_username} · {new Date(eventItem.created_at_iso).toLocaleString()}</p>
+                  <small>{eventItem.target_type}: {eventItem.target_value} · {eventItem.detail}</small>
+                </div>
+              </article>
+            ))}
+            {pagedAuditEvents.length === 0 ? <div className="banner">No hay eventos que coincidan con el filtro actual.</div> : null}
+          </div>
+          <div className="audit-footer">
+            <small>{filteredAuditEvents.length} evento(s) · pagina {safeAuditPage} de {auditTotalPages}</small>
+            <div className="action-row">
+              <button type="button" className="ghost" disabled={safeAuditPage <= 1} onClick={() => setAuditPage((current) => Math.max(1, current - 1))}>Anterior</button>
+              <button type="button" className="ghost" disabled={safeAuditPage >= auditTotalPages} onClick={() => setAuditPage((current) => Math.min(auditTotalPages, current + 1))}>Siguiente</button>
+            </div>
+          </div>
+        </Panel>
+      </section>
+    </main>
+  )
+}
+
+function LoginGate({
+  ownerMode = false,
+  authStatus,
+  error,
+  busy,
+  onLogin,
+}: {
+  ownerMode?: boolean
+  authStatus: AuthStatus | null
+  error: string | null
+  busy: boolean
+  onLogin: (username: string, password: string, bootstrapCode?: string) => Promise<void>
+}) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [bootstrapCode, setBootstrapCode] = useState('')
+  const showBootstrap = ownerMode ? Boolean(authStatus?.admin_bootstrap_required) : Boolean(authStatus?.admin_bootstrap_required && !authStatus?.has_users)
+
+  return (
+    <main className="login-shell">
+      <div className="login-stage" aria-hidden="true">
+        <span className="login-orbit orbit-a" />
+        <span className="login-orbit orbit-b" />
+        <span className="login-orbit orbit-c" />
+        <span className="login-grid-line line-a" />
+        <span className="login-grid-line line-b" />
+      </div>
+      <section className="login-card login-card-animated">
+        <div className="login-card-inner">
+          <div className="login-brand-block">
+            <BrandLogo className="brand-login-logo" />
+          </div>
+          {ownerMode ? <p className="login-bootstrap-copy login-mode-copy">Acceso owner independiente para administracion comercial.</p> : null}
+          {error ? <div className="banner error">{error}</div> : null}
+          <form className="login-form" onSubmit={(event) => { event.preventDefault(); void onLogin(username, password, bootstrapCode) }}>
+            <div className="login-fields">
+              <label>
+                <span>Usuario</span>
+                <input minLength={3} value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Usuario" />
+              </label>
+              <label>
+                <span>{authStatus?.has_users ? 'Contrasena' : 'Contrasena inicial'}</span>
+                <input type="password" minLength={4} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Contrasena" />
+              </label>
+              {showBootstrap ? (
+                <label className="login-bootstrap-field">
+                  <span>Codigo de bootstrap</span>
+                  <input minLength={8} value={bootstrapCode} onChange={(event) => setBootstrapCode(event.target.value)} placeholder="Solo visible en el servidor local" />
+                </label>
+              ) : null}
+            </div>
+            {showBootstrap ? <p className="login-bootstrap-copy">Codigo inicial: {authStatus?.admin_bootstrap_code_path ?? 'admin_bootstrap_code.txt'}</p> : null}
+            <div className="action-row login-actions">
+              <button type="submit" disabled={busy || username.trim().length < 3 || password.length < 4 || (showBootstrap && bootstrapCode.trim().length < 8)}>{busy ? 'Validando...' : showBootstrap ? ownerMode ? 'Crear acceso owner' : 'Crear acceso admin' : 'Entrar'}</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+  )
+}
+
+function ExpensePieChart({ comparisons }: { comparisons: BootstrapResponse['dashboard']['expense_comparisons'] }) {
+  const items = comparisons.filter((item) => item.current_amount > 0)
+  const total = items.reduce((sum, item) => sum + item.current_amount, 0)
+
+  if (total <= 0) {
+    return <p>Aun no hay gastos del mes para distribuir en el grafico.</p>
+  }
+
+  const radius = 76
+  const circumference = 2 * Math.PI * radius
+  let offset = 0
+
+  return (
+    <div className="pie-layout">
+      <svg viewBox="0 0 200 200" className="pie-chart" aria-label="Distribucion de gastos">
+        <circle cx="100" cy="100" r={radius} fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="28" />
+        {items.map((item) => {
+          const ratio = item.current_amount / total
+          const dash = circumference * ratio
+          const node = (
+            <circle
+              key={item.label}
+              cx="100"
+              cy="100"
+              r={radius}
+              fill="none"
+              stroke={tokenColor(item.color_token)}
+              strokeWidth="28"
+              strokeDasharray={`${dash} ${circumference - dash}`}
+              strokeDashoffset={-offset}
+              transform="rotate(-90 100 100)"
+            />
+          )
+          offset += dash
+          return node
+        })}
+        <text x="100" y="96" textAnchor="middle" className="pie-total-label">Total</text>
+        <text x="100" y="118" textAnchor="middle" className="pie-total-value">{currency(total)}</text>
+      </svg>
+      <div className="pie-legend">
+        {items.map((item) => {
+          const percentage = Math.round((item.current_amount / total) * 100)
+          return (
+            <article key={item.label} className="legend-row">
+              <span className="icon-badge narrow" style={{ background: `${tokenColor(item.color_token)}22`, color: tokenColor(item.color_token) }}>{iconGlyph(item.icon_token)}</span>
+              <div>
+                <strong>{item.label}</strong>
+                <p>{currency(item.current_amount)} · {percentage}%</p>
+              </div>
+            </article>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function SetupWizard({
+  wallets,
+  expenseCategories,
+  canEditData,
+  onActivate,
+  saving,
+  onLogout,
+}: {
+  wallets: string[]
+  expenseCategories: CategoryConfig[]
+  canEditData: boolean
+  onActivate: (payload: InitialSetupPayload) => Promise<void>
+  saving: boolean
+  onLogout: () => void
+}) {
+  const [step, setStep] = useState(0)
+  const [fixedIncomes, setFixedIncomes] = useState<FixedIncomeSourceInput[]>([])
+  const [obligations, setObligations] = useState<ObligationInput[]>([])
+  const [incomeForm, setIncomeForm] = useState<FixedIncomeSourceInput>(emptyFixedIncome(wallets[0] ?? 'Banco'))
+  const [obligationForm, setLocalObligationForm] = useState<ObligationInput>(emptyObligation(expenseCategories[0]?.id ?? 'casa'))
+  const [editingIncomeIndex, setEditingIncomeIndex] = useState<number | null>(null)
+  const [editingObligationIndex, setEditingObligationIndex] = useState<number | null>(null)
+
+  const incomeBaseTotal = fixedIncomes.filter((item) => item.active).reduce((sum, item) => sum + item.amount, 0)
+  const obligationsTotal = obligations.reduce((sum, item) => sum + item.amount, 0)
+
+  const saveIncome = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setFixedIncomes((current) => {
+      const next = [...current]
+      if (editingIncomeIndex === null) {
+        next.push(incomeForm)
+      } else {
+        next[editingIncomeIndex] = incomeForm
+      }
+      return next
+    })
+    setIncomeForm(emptyFixedIncome(wallets[0] ?? 'Banco'))
+    setEditingIncomeIndex(null)
+  }
+
+  const saveObligation = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const payload = deriveObligationKind(obligationForm, expenseCategories)
+    setObligations((current) => {
+      const next = [...current]
+      if (editingObligationIndex === null) {
+        next.push(payload)
+      } else {
+        next[editingObligationIndex] = payload
+      }
+      return next
+    })
+    setLocalObligationForm(emptyObligation(expenseCategories[0]?.id ?? 'casa'))
+    setEditingObligationIndex(null)
+  }
+
+  return (
+    <main className="app-shell wizard-shell">
+      <section className="wizard-hero">
+        <div>
+          <BrandLogo className="brand-hero-logo" />
+          <p className="eyebrow">Primera configuracion</p>
+          <h1>{step === 0 ? 'Define tus ingresos fijos' : step === 1 ? 'Define tus gastos fijos' : 'Activa tu tablero real'}</h1>
+        </div>
+        <div className="hero-card compact-card">
+          <span>Acceso de esta PC activo</span>
+          <strong>{`${step + 1}/3`}</strong>
+          <p>Puedes cerrar sesion si prefieres salir antes de terminar el wizard.</p>
+          <div className="action-row top-gap">
+            <button type="button" className="ghost light" onClick={onLogout}>Cerrar sesion</button>
+          </div>
+        </div>
+        <div className="wizard-summary-grid">
+          <MetricCard label="Base ingresos" value={currency(incomeBaseTotal)} />
+          <MetricCard label="Gastos fijos" value={currency(obligationsTotal)} />
+          <MetricCard label="Paso" value={`${step + 1} de 3`} />
+        </div>
+      </section>
+
+      {!canEditData ? <div className="banner">Tu cuenta no puede completar ni modificar la configuracion inicial.</div> : null}
+
+      <nav className="tab-rail wizard-steps" aria-label="Pasos del asistente">
+        {['Ingresos', 'Compromisos', 'Activacion'].map((label, index) => (
+          <button key={label} type="button" className={step === index ? 'tab-chip active' : 'tab-chip'} onClick={() => { if (index === 0 || fixedIncomes.length > 0) setStep(index) }}>
+            <strong>{label}</strong>
+            <span>{index === 0 ? 'Base esperada' : index === 1 ? 'Mapa fijo' : 'Resumen final'}</span>
+          </button>
+        ))}
+      </nav>
+
+      {step === 0 ? (
+        <Panel title="Ingresos fijos" subtitle="Base esperada.">
+          <form className="form-grid dynamic-form" onSubmit={saveIncome}>
+            <label>
+              Etiqueta
+              <input value={incomeForm.label} onChange={(event) => setIncomeForm((current) => ({ ...current, label: event.target.value }))} />
+            </label>
+            <label>
+              Monto mensual esperado
+              <input type="number" min="0" step="0.01" value={incomeForm.amount || ''} onChange={(event) => setIncomeForm((current) => ({ ...current, amount: Number(event.target.value) }))} />
+            </label>
+            <label>
+              Frecuencia
+              <select value={incomeForm.cadence} onChange={(event) => setIncomeForm((current) => ({ ...current, cadence: event.target.value as FixedIncomeSourceInput['cadence'] }))}>
+                <option value="monthly">Mensual</option>
+                <option value="biweekly">Quincenal</option>
+                <option value="weekly">Semanal</option>
+              </select>
+            </label>
+            <label>
+              Dia esperado
+              <input type="number" min="1" max="31" value={incomeForm.expected_day} onChange={(event) => setIncomeForm((current) => ({ ...current, expected_day: Number(event.target.value) }))} />
+            </label>
+            <label>
+              Cartera
+              <select value={incomeForm.wallet} onChange={(event) => setIncomeForm((current) => ({ ...current, wallet: event.target.value }))}>
+                {wallets.map((wallet) => <option key={wallet} value={wallet}>{wallet}</option>)}
+              </select>
+            </label>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={incomeForm.active} onChange={(event) => setIncomeForm((current) => ({ ...current, active: event.target.checked }))} /> Activo
+            </label>
+            <div className="span-2 action-row">
+              <button type="submit" disabled={!canEditData}>{editingIncomeIndex === null ? 'Agregar ingreso fijo' : 'Actualizar ingreso fijo'}</button>
+            </div>
+          </form>
+          <div className="list-stack">
+            {fixedIncomes.map((item, index) => (
+              <article key={`${item.label}-${index}`} className="list-card">
+                <div>
+                  <strong>{item.label}</strong>
+                  <p>{item.cadence} · {item.wallet} · dia {item.expected_day}</p>
+                </div>
+                <div className="list-actions">
+                  <span className="amount positive">{currency(item.amount)}</span>
+                  <button type="button" className="ghost" disabled={!canEditData} onClick={() => { setEditingIncomeIndex(index); setIncomeForm(item) }}>Editar</button>
+                  <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => setFixedIncomes((current) => current.filter((_, currentIndex) => currentIndex !== index))}>Borrar</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+
+      {step === 1 ? (
+        <Panel title="Gastos fijos" subtitle="Compromisos iniciales.">
+          <form className="form-grid dynamic-form" onSubmit={saveObligation}>
+            <label>
+              Etiqueta
+              <input value={obligationForm.label} onChange={(event) => setLocalObligationForm((current) => ({ ...current, label: event.target.value }))} />
+            </label>
+            <label>
+              Monto mensual
+              <input type="number" min="0" step="0.01" value={obligationForm.amount || ''} onChange={(event) => setLocalObligationForm((current) => ({ ...current, amount: Number(event.target.value) }))} />
+            </label>
+            <label>
+              Categoria
+              <select value={obligationForm.category_id ?? ''} onChange={(event) => setLocalObligationForm((current) => ({ ...current, category_id: event.target.value }))}>
+                {expenseCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}
+              </select>
+            </label>
+            <label>
+              Frecuencia
+              <select value={obligationForm.cadence} onChange={(event) => setLocalObligationForm((current) => ({ ...current, cadence: event.target.value as ObligationInput['cadence'] }))}>
+                <option value="monthly">Mensual</option>
+                <option value="biweekly">Quincenal</option>
+                <option value="weekly">Semanal</option>
+              </select>
+            </label>
+            <label>
+              Dia de vencimiento
+              <input type="number" min="1" max="31" value={obligationForm.due_day} onChange={(event) => setLocalObligationForm((current) => ({ ...current, due_day: Number(event.target.value) }))} />
+            </label>
+            <label>
+              Estado
+              <select value={obligationForm.status} onChange={(event) => setLocalObligationForm((current) => ({ ...current, status: event.target.value }))}>
+                <option value="Pendiente">Pendiente</option>
+                <option value="Parcial">Parcial</option>
+                <option value="Cubierto">Cubierto</option>
+              </select>
+            </label>
+            <div className="span-2 action-row">
+              <button type="submit" disabled={!canEditData}>{editingObligationIndex === null ? 'Agregar gasto fijo' : 'Actualizar gasto fijo'}</button>
+            </div>
+          </form>
+          <div className="list-stack">
+            {obligations.map((item, index) => (
+              <article key={`${item.label}-${index}`} className="list-card">
+                <div>
+                  <strong>{item.label}</strong>
+                  <p>{item.status} · {item.cadence} · dia {item.due_day}</p>
+                </div>
+                <div className="list-actions">
+                  <span className="amount neutral">{currency(item.amount)}</span>
+                  <button type="button" className="ghost" disabled={!canEditData} onClick={() => { setEditingObligationIndex(index); setLocalObligationForm(item) }}>Editar</button>
+                  <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => setObligations((current) => current.filter((_, currentIndex) => currentIndex !== index))}>Borrar</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+
+      {step === 2 ? (
+        <Panel title="Resumen de activacion" subtitle="Confirmacion final.">
+          <div className="wizard-summary-stack">
+            <div className="summary-line"><span>Ingresos fijos</span><strong>{fixedIncomes.length}</strong></div>
+            <div className="summary-line"><span>Base mensual esperada</span><strong>{currency(incomeBaseTotal)}</strong></div>
+            <div className="summary-line"><span>Gastos fijos</span><strong>{obligations.length}</strong></div>
+            <div className="summary-line"><span>Apartado quincenal base</span><strong>{currency(obligationsTotal / 2)}</strong></div>
+          </div>
+        </Panel>
+      ) : null}
+
+      <div className="wizard-actions">
+        {step > 0 ? <button type="button" className="ghost" onClick={() => setStep((current) => current - 1)}>Atras</button> : null}
+        {step < 2 ? <button type="button" disabled={(step === 0 && fixedIncomes.length === 0) || !canEditData} onClick={() => setStep((current) => current + 1)}>Continuar</button> : <button type="button" disabled={saving || fixedIncomes.length === 0 || !canEditData} onClick={() => void onActivate({ fixed_income_sources: fixedIncomes, obligations })}>{saving ? 'Guardando...' : 'Activar Gride Ledger'}</button>}
+      </div>
+      <HelpDock compact />
+    </main>
+  )
+}
+
+export default App

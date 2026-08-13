@@ -1,0 +1,159 @@
+:root {
+  color: #111827;
+  background: var(--page-gradient);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --font-display: Inter, 'Segoe UI', sans-serif;
+  --font-body: Inter, 'Segoe UI', sans-serif;
+  --ivory: #f5f7fb;
+  --paper: #ffffff;
+  --sand: #eef2f8;
+  --petrol: #0b1739;
+  --emerald: #17b26a;
+  --gold: #2864ff;
+  --terracotta: #ff6b6b;
+  --sky: #8db4ff;
+  --plum: #7b7cff;
+  --amber: #3ddc97;
+  --coral: #ff8a65;
+  --sage: #3ddc97;
+  --slate: #667085;
+  --ink: #111827;
+  --muted: #667085;
+  --muted-strong: #344054;
+  --line: rgba(17, 24, 39, 0.08);
+  --accent: #2864ff;
+  --accent-2: #0b1739;
+  --panel-bg: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,247,251,0.96));
+  --card-shadow: 0 18px 40px rgba(11, 23, 57, 0.08);
+  --hero-gradient: linear-gradient(135deg, #0b1739, #15307a 58%, #2864ff);
+  --active-gradient: linear-gradient(135deg, #0b1739, #2864ff);
+  --input-bg: rgba(255,255,255,0.92);
+  --radius-xl: 24px;
+  --page-gradient: radial-gradient(circle at top left, rgba(40, 100, 255, 0.16), transparent 26%), radial-gradient(circle at top right, rgba(61, 220, 151, 0.12), transparent 20%), linear-gradient(180deg, #f5f7fb 0%, #ffffff 44%, #eef2f8 100%);
+  font-family: var(--font-body);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: color-mix(in srgb, var(--paper) 78%, white 22%); font-family: var(--font-body); transition: color 320ms ease; }
+#root { min-height: 100vh; position: relative; isolation: isolate; }
+#root::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--page-gradient);
+  transform-origin: center;
+  will-change: opacity, transform, filter;
+  animation: section-bg-shift 700ms cubic-bezier(0.22, 0.78, 0.2, 1) both;
+}
+h1, h2, h3, p { margin: 0; }
+h1, h2, h3 { color: var(--ink); font-family: var(--font-display); }
+button:disabled { opacity: 0.6; cursor: wait; }
+.screen-state { min-height: 100vh; display: grid; place-items: center; padding: 24px; color: var(--ink); }
+.screen-state.error, .banner.error { color: #7e413c; }
+.banner { padding: 16px 18px; margin-bottom: 18px; }
+
+body[data-app-tab='dashboard'] #root::before {
+  background:
+    radial-gradient(circle at 10% 16%, color-mix(in srgb, var(--gold) 48%, transparent 52%), transparent 22%),
+    radial-gradient(circle at 84% 12%, color-mix(in srgb, var(--amber) 34%, transparent 66%), transparent 24%),
+    radial-gradient(circle at 50% 72%, color-mix(in srgb, var(--terracotta) 14%, transparent 86%), transparent 26%),
+    linear-gradient(180deg, color-mix(in srgb, var(--paper) 32%, white 68%) 0%, color-mix(in srgb, var(--ivory) 34%, var(--gold) 66%) 34%, color-mix(in srgb, var(--amber) 26%, var(--sand) 74%) 100%);
+  animation-name: section-bg-shift-dashboard;
+}
+
+body[data-app-tab='transactions'] #root::before {
+  background:
+    radial-gradient(circle at 10% 14%, color-mix(in srgb, var(--emerald) 58%, transparent 42%), transparent 22%),
+    radial-gradient(circle at 92% 16%, color-mix(in srgb, var(--sky) 42%, transparent 58%), transparent 24%),
+    radial-gradient(circle at 76% 82%, color-mix(in srgb, var(--petrol) 18%, transparent 82%), transparent 24%),
+    linear-gradient(180deg, color-mix(in srgb, var(--paper) 28%, white 72%) 0%, color-mix(in srgb, var(--ivory) 20%, var(--sky) 80%) 24%, color-mix(in srgb, var(--emerald) 30%, var(--paper) 70%) 100%);
+  animation-name: section-bg-shift-transactions;
+}
+
+body[data-app-tab='base'] #root::before {
+  background:
+    radial-gradient(circle at 12% 12%, color-mix(in srgb, var(--terracotta) 40%, transparent 60%), transparent 24%),
+    radial-gradient(circle at 86% 12%, color-mix(in srgb, var(--gold) 32%, transparent 68%), transparent 22%),
+    radial-gradient(circle at 50% 86%, color-mix(in srgb, var(--coral) 20%, transparent 80%), transparent 22%),
+    linear-gradient(180deg, color-mix(in srgb, var(--paper) 54%, white 46%) 0%, color-mix(in srgb, var(--ivory) 58%, white 42%) 38%, color-mix(in srgb, var(--terracotta) 18%, var(--paper) 82%) 100%);
+  animation-name: section-bg-shift-base;
+}
+
+body[data-app-tab='settings'] #root::before {
+  background:
+    radial-gradient(circle at 14% 10%, color-mix(in srgb, var(--plum) 56%, transparent 44%), transparent 22%),
+    radial-gradient(circle at 88% 12%, color-mix(in srgb, var(--sky) 32%, transparent 68%), transparent 24%),
+    radial-gradient(circle at 52% 78%, color-mix(in srgb, var(--sage) 22%, transparent 78%), transparent 20%),
+    linear-gradient(180deg, color-mix(in srgb, var(--paper) 34%, white 66%) 0%, color-mix(in srgb, var(--ivory) 28%, var(--sky) 72%) 24%, color-mix(in srgb, var(--plum) 26%, var(--paper) 74%) 100%);
+  animation-name: section-bg-shift-settings;
+}
+
+@keyframes section-bg-shift {
+  0% {
+    opacity: 0.78;
+    transform: scale(1.03);
+    filter: saturate(0.96) blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: saturate(1) blur(0);
+  }
+}
+
+@keyframes section-bg-shift-dashboard {
+  0% {
+    opacity: 0.8;
+    transform: scale(1.035) translateY(14px);
+    filter: blur(6px) saturate(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0) saturate(1.04);
+  }
+}
+
+@keyframes section-bg-shift-transactions {
+  0% {
+    opacity: 0.8;
+    transform: scale(1.035) translateX(12px);
+    filter: blur(6px) saturate(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+    filter: blur(0) saturate(1.06);
+  }
+}
+
+@keyframes section-bg-shift-base {
+  0% {
+    opacity: 0.8;
+    transform: scale(1.035) translateY(-12px);
+    filter: blur(6px) saturate(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0) saturate(1.08);
+  }
+}
+
+@keyframes section-bg-shift-settings {
+  0% {
+    opacity: 0.8;
+    transform: scale(1.035) translateX(-12px);
+    filter: blur(6px) saturate(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+    filter: blur(0) saturate(1.08);
+  }
+}
