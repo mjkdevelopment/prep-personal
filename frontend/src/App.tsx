@@ -1775,7 +1775,7 @@ function LoginGate({
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [bootstrapCode, setBootstrapCode] = useState('')
-  const showBootstrap = ownerMode ? Boolean(authStatus?.admin_bootstrap_required) : Boolean(authStatus?.admin_bootstrap_required && !authStatus?.has_users)
+  const showBootstrap = ownerMode ? Boolean(authStatus?.admin_bootstrap_required) : false
 
   return (
     <main className="login-shell">
