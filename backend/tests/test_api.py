@@ -196,6 +196,56 @@ def test_complete_and_reset_setup_flow() -> None:
     assert bootstrap_payload['transactions'] == []
 
 
+def test_dashboard_monthly_expected_converts_weekly_and_biweekly_amounts() -> None:
+    headers = ensure_app_headers('cadenceuser', '1234')
+    response = client.post(
+        '/api/setup/complete',
+        json={
+            'fixed_income_sources': [
+                {
+                    'label': 'Semanal base',
+                    'amount': 7500,
+                    'cadence': 'weekly',
+                    'expected_day': 30,
+                    'expected_weekday': 1,
+                    'wallet': 'Banco',
+                    'active': True,
+                },
+                {
+                    'label': 'Quincenal base',
+                    'amount': 12000,
+                    'cadence': 'biweekly',
+                    'expected_day': 15,
+                    'expected_weekday': None,
+                    'wallet': 'Banco',
+                    'active': True,
+                },
+            ],
+            'obligations': [
+                {
+                    'label': 'Servicio semanal',
+                    'amount': 5000,
+                    'category_id': 'casa',
+                    'cadence': 'weekly',
+                    'due_day': 15,
+                    'due_weekday': 1,
+                    'kind': 'Fija',
+                    'status': 'Pendiente',
+                }
+            ],
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['dashboard']['fixed_income_expected'] == 54000
+    assert payload['dashboard']['monthly_fixed_outflow_total'] == 20000
+    assert payload['dashboard']['reserve_per_quincena'] == 10000
+    assert payload['dashboard']['quincena_reserve_views'][1]['amount'] == 10000
+    assert payload['dashboard']['quincena_reserve_views'][2]['amount'] == 10000
+
+
 def test_category_and_tag_upsert_require_auth() -> None:
     headers = ensure_app_headers('cataloguser', '1234')
     category_response = client.post('/api/categories', json={'id': 'mascotas', 'label': 'Mascotas', 'scope': 'expense', 'type': 'Variable', 'color_token': 'plum', 'icon_token': 'favorite', 'active': True}, headers=headers)

@@ -41,6 +41,7 @@ import type {
   BootstrapResponse,
   CategoryConfig,
   CategoryConfigInput,
+  FixedIncomeCadence,
   FixedIncomeSource,
   FixedIncomeSourceInput,
   FlutterImportSummary,
@@ -227,6 +228,30 @@ function walletVisual(wallet: string): { icon: string; color: string } {
     default:
       return { icon: 'briefcase', color: 'sky' }
   }
+}
+
+function cadencePaymentsPerMonth(cadence: FixedIncomeCadence): number {
+  switch (cadence) {
+    case 'weekly':
+      return 4
+    case 'biweekly':
+      return 2
+    default:
+      return 1
+  }
+}
+
+function cadenceExpectedMonthlyAmount(amount: number, cadence: FixedIncomeCadence): number {
+  return amount * cadencePaymentsPerMonth(cadence)
+}
+
+function cadenceProjectionCopy(amount: number, cadence: FixedIncomeCadence, singularLabel: string): string {
+  const payments = cadencePaymentsPerMonth(cadence)
+  const monthlyExpected = cadenceExpectedMonthlyAmount(amount, cadence)
+  if (payments === 1) {
+    return `Se espera 1 ${singularLabel} de ${currency(amount)} al mes.`
+  }
+  return `Se esperan ${payments} ${singularLabel}s de ${currency(amount)}. Base mensual: ${currency(monthlyExpected)}.`
 }
 
 function VisualBadge({ iconToken, colorToken, narrow = false }: { iconToken: string; colorToken: string; narrow?: boolean }) {
@@ -1902,8 +1927,8 @@ function SetupWizard({
   const [editingIncomeIndex, setEditingIncomeIndex] = useState<number | null>(null)
   const [editingObligationIndex, setEditingObligationIndex] = useState<number | null>(null)
 
-  const incomeBaseTotal = fixedIncomes.filter((item) => item.active).reduce((sum, item) => sum + item.amount, 0)
-  const obligationsTotal = obligations.reduce((sum, item) => sum + item.amount, 0)
+  const incomeBaseTotal = fixedIncomes.filter((item) => item.active).reduce((sum, item) => sum + cadenceExpectedMonthlyAmount(item.amount, item.cadence), 0)
+  const obligationsTotal = obligations.reduce((sum, item) => sum + cadenceExpectedMonthlyAmount(item.amount, item.cadence), 0)
 
   const saveIncome = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1978,7 +2003,7 @@ function SetupWizard({
               <input value={incomeForm.label} onChange={(event) => setIncomeForm((current) => ({ ...current, label: event.target.value }))} />
             </label>
             <label>
-              Monto mensual esperado
+              Monto por pago esperado
               <input type="number" min="0" step="0.01" value={incomeForm.amount || ''} onChange={(event) => setIncomeForm((current) => ({ ...current, amount: Number(event.target.value) }))} />
             </label>
             <label>
@@ -2002,6 +2027,7 @@ function SetupWizard({
             <label className="checkbox-row">
               <input type="checkbox" checked={incomeForm.active} onChange={(event) => setIncomeForm((current) => ({ ...current, active: event.target.checked }))} /> Activo
             </label>
+            <div className="span-2 banner subtle">{cadenceProjectionCopy(incomeForm.amount || 0, incomeForm.cadence, 'pago')}</div>
             <div className="span-2 action-row">
               <button type="submit" disabled={!canEditData}>{editingIncomeIndex === null ? 'Agregar ingreso fijo' : 'Actualizar ingreso fijo'}</button>
             </div>
@@ -2012,9 +2038,10 @@ function SetupWizard({
                 <div>
                   <strong>{item.label}</strong>
                   <p>{item.cadence} · {item.wallet} · dia {item.expected_day}</p>
+                  <small>{cadenceProjectionCopy(item.amount, item.cadence, 'pago')}</small>
                 </div>
                 <div className="list-actions">
-                  <span className="amount positive">{currency(item.amount)}</span>
+                  <span className="amount positive">{currency(cadenceExpectedMonthlyAmount(item.amount, item.cadence))}</span>
                   <button type="button" className="ghost" disabled={!canEditData} onClick={() => { setEditingIncomeIndex(index); setIncomeForm(item) }}>Editar</button>
                   <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => setFixedIncomes((current) => current.filter((_, currentIndex) => currentIndex !== index))}>Borrar</button>
                 </div>
@@ -2032,7 +2059,7 @@ function SetupWizard({
               <input value={obligationForm.label} onChange={(event) => setLocalObligationForm((current) => ({ ...current, label: event.target.value }))} />
             </label>
             <label>
-              Monto mensual
+              Monto por pago
               <input type="number" min="0" step="0.01" value={obligationForm.amount || ''} onChange={(event) => setLocalObligationForm((current) => ({ ...current, amount: Number(event.target.value) }))} />
             </label>
             <label>
@@ -2061,6 +2088,7 @@ function SetupWizard({
                 <option value="Cubierto">Cubierto</option>
               </select>
             </label>
+            <div className="span-2 banner subtle">{cadenceProjectionCopy(obligationForm.amount || 0, obligationForm.cadence, 'pago')}</div>
             <div className="span-2 action-row">
               <button type="submit" disabled={!canEditData}>{editingObligationIndex === null ? 'Agregar gasto fijo' : 'Actualizar gasto fijo'}</button>
             </div>
@@ -2071,9 +2099,10 @@ function SetupWizard({
                 <div>
                   <strong>{item.label}</strong>
                   <p>{item.status} · {item.cadence} · dia {item.due_day}</p>
+                  <small>{cadenceProjectionCopy(item.amount, item.cadence, 'pago')}</small>
                 </div>
                 <div className="list-actions">
-                  <span className="amount neutral">{currency(item.amount)}</span>
+                  <span className="amount neutral">{currency(cadenceExpectedMonthlyAmount(item.amount, item.cadence))}</span>
                   <button type="button" className="ghost" disabled={!canEditData} onClick={() => { setEditingObligationIndex(index); setLocalObligationForm(item) }}>Editar</button>
                   <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => setObligations((current) => current.filter((_, currentIndex) => currentIndex !== index))}>Borrar</button>
                 </div>

@@ -26,6 +26,18 @@ def _affects_cash_negatively(kind: str) -> bool:
     return kind in {'gasto', 'ahorro', 'inversion', 'deuda'}
 
 
+def _payments_per_month(cadence: str) -> int:
+    if cadence == 'weekly':
+        return 4
+    if cadence == 'biweekly':
+        return 2
+    return 1
+
+
+def _monthly_expected_amount(amount: float, cadence: str) -> float:
+    return amount * _payments_per_month(cadence)
+
+
 def suggest_income_allocation(amount: float, snapshot: FinancialSnapshot) -> AllocationSuggestion:
     if amount <= 0:
         return AllocationSuggestion(for_obligations=0, for_goals=0, for_personal=0, rationale='Introduce un monto valido para generar una recomendacion.')
@@ -47,11 +59,11 @@ def suggest_income_allocation(amount: float, snapshot: FinancialSnapshot) -> All
 
 def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], transactions: list[Transaction], categories: list[CategoryConfig]) -> DashboardSummary:
     now = datetime.now()
-    fixed_income_expected = sum(item.amount for item in fixed_income_sources if item.active)
+    fixed_income_expected = sum(_monthly_expected_amount(item.amount, item.cadence) for item in fixed_income_sources if item.active)
     income_reported_this_month = sum(item.amount for item in transactions if _is_income(item.kind) and item.date.year == now.year and item.date.month == now.month)
-    pending_obligations_total = sum(item.amount for item in obligations if item.status != 'Cubierto')
-    obligations_target = sum(item.amount for item in obligations)
-    obligations_reserved = sum(item.amount for item in obligations if item.status in {'Cubierto', 'Parcial'})
+    pending_obligations_total = sum(_monthly_expected_amount(item.amount, item.cadence) for item in obligations if item.status != 'Cubierto')
+    obligations_target = sum(_monthly_expected_amount(item.amount, item.cadence) for item in obligations)
+    obligations_reserved = sum(_monthly_expected_amount(item.amount, item.cadence) for item in obligations if item.status in {'Cubierto', 'Parcial'})
     goals_target = fixed_income_expected * 0.20
     goals_reserved = sum(item.amount for item in transactions if item.kind in {'ahorro', 'inversion', 'deuda'})
     personal_spent_this_month = sum(item.amount for item in transactions if item.kind == 'gasto' and item.date.year == now.year and item.date.month == now.month)
@@ -65,18 +77,22 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     quincena_coverage = 1 if obligations_target == 0 else max(0, min(obligations_reserved / obligations_target, 1))
     current_month_expense_total = sum(item.amount for item in transactions if item.kind == 'gasto' and item.date.year == now.year and item.date.month == now.month)
     previous_month_expense_total = sum(item.amount for item in transactions if item.kind == 'gasto' and item.date.year == datetime(now.year, now.month - 1, 1).year and item.date.month == datetime(now.year, now.month - 1, 1).month)
-    monthly_fixed_outflow_total = sum(item.amount for item in obligations)
+    monthly_fixed_outflow_total = sum(_monthly_expected_amount(item.amount, item.cadence) for item in obligations)
     reserve_per_quincena = monthly_fixed_outflow_total / 2
 
     def first_half(item: Obligation) -> float:
         if item.cadence == 'monthly':
             return item.amount if item.due_day <= 15 else 0
-        return item.amount / 2
+        if item.cadence == 'biweekly':
+            return item.amount
+        return item.amount * 2
 
     def second_half(item: Obligation) -> float:
         if item.cadence == 'monthly':
             return item.amount if item.due_day > 15 else 0
-        return item.amount / 2
+        if item.cadence == 'biweekly':
+            return item.amount
+        return item.amount * 2
 
     category_by_label = {item.label: item for item in categories}
     current_category_totals: dict[str, float] = {}
