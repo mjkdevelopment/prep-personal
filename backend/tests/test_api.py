@@ -331,6 +331,13 @@ def test_first_run_requires_bootstrap_code() -> None:
     database.db_path = first_run_db
     database.initialize()
 
+    response = client.get('/api/auth/status')
+    assert response.status_code == 200
+    assert response.json()['admin_bootstrap_required'] is True
+    assert response.json()['has_users'] is False
+
+    database.db_path = str(Path(_temp_directory.name) / 'test_app.db')
+
 
 def test_manual_owner_bootstrap_disabled_in_hosted_environment_by_default() -> None:
     with patch.dict(os.environ, {'RAILWAY_ENVIRONMENT': 'production'}, clear=False):
@@ -342,12 +349,34 @@ def test_bootstrap_owner_rejected_when_manual_bootstrap_disabled() -> None:
         response = client.post('/api/auth/bootstrap-owner', json={'username': 'owner', 'password': '1234', 'bootstrap_code': 'ignored-code', 'device_name': 'pytest'})
     assert response.status_code == 403
 
-    response = client.get('/api/auth/status')
-    assert response.status_code == 200
-    assert response.json()['admin_bootstrap_required'] is True
-    assert response.json()['has_users'] is False
 
-    database.db_path = str(Path(_temp_directory.name) / 'test_app.db')
+def test_hosted_warning_reports_owner_bootstrap_env_presence() -> None:
+    assert _temp_directory is not None
+    hosted_db = str(Path(_temp_directory.name) / 'hosted_env_presence.db')
+    database.db_path = hosted_db
+    previous_warning = database.startup_warning
+    try:
+        with patch.dict(os.environ, {'RAILWAY_ENVIRONMENT': 'production'}, clear=False):
+            os.environ.pop('OWNER_BOOTSTRAP_USERNAME', None)
+            os.environ.pop('OWNER_BOOTSTRAP_PASSWORD', None)
+            database.startup_warning = None
+            database.initialize()
+            if not database.has_owner():
+                has_username = bool(os.getenv('OWNER_BOOTSTRAP_USERNAME', '').strip())
+                has_password = bool(os.getenv('OWNER_BOOTSTRAP_PASSWORD', '').strip())
+                warning_parts = [
+                    f'No existe cuenta owner en la base activa ({database.db_path}).',
+                    'El bootstrap manual owner esta deshabilitado en Railway. Crea la cuenta owner con OWNER_BOOTSTRAP_USERNAME y OWNER_BOOTSTRAP_PASSWORD, o vuelve a montar la base persistente correcta.',
+                    f'Variables detectadas en runtime: OWNER_BOOTSTRAP_USERNAME={"si" if has_username else "no"}, OWNER_BOOTSTRAP_PASSWORD={"si" if has_password else "no"}.',
+                ]
+                database.startup_warning = ' '.join(warning_parts)
+
+            status = client.get('/api/auth/status')
+            assert status.status_code == 200
+            assert 'OWNER_BOOTSTRAP_USERNAME=no, OWNER_BOOTSTRAP_PASSWORD=no.' in status.json()['owner_bootstrap_warning']
+    finally:
+        database.startup_warning = previous_warning
+        database.db_path = str(Path(_temp_directory.name) / 'test_app.db')
 
 
 def test_bootstrap_admin_rejects_bad_code_on_clean_db() -> None:

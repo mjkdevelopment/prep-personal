@@ -37,6 +37,12 @@ def _manual_owner_bootstrap_enabled() -> bool:
     return not _is_hosted_environment()
 
 
+def _owner_bootstrap_env_presence() -> tuple[bool, bool]:
+    has_username = bool(os.getenv('OWNER_BOOTSTRAP_USERNAME', '').strip())
+    has_password = bool(os.getenv('OWNER_BOOTSTRAP_PASSWORD', '').strip())
+    return has_username, has_password
+
+
 def _require_existing_db(database_path: str) -> None:
     if not _env_flag('REQUIRE_EXISTING_DB'):
         return
@@ -78,6 +84,7 @@ async def lifespan(_: FastAPI):
 
     if not has_owner:
         warning_parts: list[str] = []
+        has_owner_bootstrap_username, has_owner_bootstrap_password = _owner_bootstrap_env_presence()
         if database.startup_warning:
             warning_parts.append(database.startup_warning)
         warning_parts.append(f'No existe cuenta owner en la base activa ({database.db_path}).')
@@ -87,6 +94,9 @@ async def lifespan(_: FastAPI):
             warning_parts.append('APP_DB_PATH no apunta a /data. Define APP_DB_PATH=/data/gride_ledger.db y monta el volumen en /data.')
         if _is_hosted_environment() and not _manual_owner_bootstrap_enabled():
             warning_parts.append('El bootstrap manual owner esta deshabilitado en Railway. Crea la cuenta owner con OWNER_BOOTSTRAP_USERNAME y OWNER_BOOTSTRAP_PASSWORD, o vuelve a montar la base persistente correcta.')
+            warning_parts.append(
+                f'Variables detectadas en runtime: OWNER_BOOTSTRAP_USERNAME={"si" if has_owner_bootstrap_username else "no"}, OWNER_BOOTSTRAP_PASSWORD={"si" if has_owner_bootstrap_password else "no"}.'
+            )
         database.startup_warning = ' '.join(warning_parts)
     yield
 
