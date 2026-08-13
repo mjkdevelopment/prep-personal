@@ -921,7 +921,7 @@ textarea {
 
 .kind-chip-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 10px;
 }
 
@@ -943,7 +943,7 @@ textarea {
   display: block;
   width: 100%;
   line-height: 1.15;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 .kind-chip.active {
