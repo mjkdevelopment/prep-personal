@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterator
 
 from .defaults import DEFAULT_CATEGORIES, DEFAULT_TAGS
-from .schemas import AuditEvent, CategoryConfig, FixedIncomeSource, Obligation, TagConfig, Transaction, UserRole, UserSummary
+from .schemas import AuditEvent, CategoryConfig, CreditCard, CreditCardStatement, CreditCardStatementItem, FixedIncomeSource, Obligation, TagConfig, Transaction, UserRole, UserSummary
 
 
 @dataclass
@@ -67,6 +67,9 @@ class Database:
             connection.execute('CREATE TABLE IF NOT EXISTS fixed_income_sources(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, label TEXT NOT NULL, amount REAL NOT NULL, cadence TEXT NOT NULL, expected_day INTEGER NOT NULL, expected_weekday INTEGER, wallet TEXT NOT NULL, active INTEGER NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS obligations(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, label TEXT NOT NULL, amount REAL NOT NULL, category_id TEXT, cadence TEXT NOT NULL, due_day INTEGER NOT NULL, due_weekday INTEGER, kind TEXT NOT NULL, status TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS transactions(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, kind TEXT NOT NULL, amount REAL NOT NULL, wallet TEXT NOT NULL, category TEXT NOT NULL, tags_json TEXT NOT NULL, notes TEXT NOT NULL, date_iso TEXT NOT NULL, recurring INTEGER NOT NULL)')
+            connection.execute('CREATE TABLE IF NOT EXISTS credit_cards(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, label TEXT NOT NULL, last4 TEXT NOT NULL, closing_day INTEGER NOT NULL, due_day INTEGER NOT NULL, limit_amount REAL NOT NULL, active INTEGER NOT NULL)')
+            connection.execute('CREATE TABLE IF NOT EXISTS credit_card_statements(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, credit_card_id INTEGER NOT NULL, statement_date_iso TEXT NOT NULL, due_date_iso TEXT NOT NULL, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, statement_amount REAL NOT NULL, notes TEXT NOT NULL)')
+            connection.execute('CREATE TABLE IF NOT EXISTS credit_card_statement_items(id INTEGER PRIMARY KEY AUTOINCREMENT, statement_id INTEGER NOT NULL, obligation_id INTEGER NOT NULL, amount REAL NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS app_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at_iso TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, theme_id TEXT NOT NULL, setup_complete INTEGER NOT NULL, is_admin INTEGER NOT NULL, created_at_iso TEXT NOT NULL, updated_at_iso TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS trusted_sessions(token_hash TEXT PRIMARY KEY, user_id INTEGER, device_name TEXT NOT NULL, created_at_iso TEXT NOT NULL, last_used_at_iso TEXT NOT NULL)')
@@ -74,9 +77,11 @@ class Database:
 
             self._ensure_column(connection, 'fixed_income_sources', 'user_id', 'INTEGER')
             self._ensure_column(connection, 'obligations', 'user_id', 'INTEGER')
+            self._ensure_column(connection, 'obligations', 'credit_card_id', 'INTEGER')
             self._ensure_column(connection, 'transactions', 'user_id', 'INTEGER')
             self._ensure_column(connection, 'transactions', 'fixed_income_source_id', 'INTEGER')
             self._ensure_column(connection, 'transactions', 'obligation_id', 'INTEGER')
+            self._ensure_column(connection, 'transactions', 'credit_card_statement_id', 'INTEGER')
             self._ensure_column(connection, 'trusted_sessions', 'user_id', 'INTEGER')
             self._ensure_column(connection, 'users', 'theme_id', "TEXT NOT NULL DEFAULT 'emerald_editorial'")
             self._ensure_column(connection, 'users', 'setup_complete', 'INTEGER NOT NULL DEFAULT 0')
@@ -405,12 +410,13 @@ class Database:
         with self.connect() as connection:
             rows = connection.execute('SELECT * FROM obligations WHERE user_id = ? ORDER BY cadence ASC, due_weekday ASC, due_day ASC, id ASC', (user_id,)).fetchall()
             progress = self._current_period_totals(connection, user_id, 'obligation_id', 'gasto')
-        return [self._obligation(row, progress.get(row['id'], 0)) for row in rows]
+            statement_progress = self._current_period_credit_card_obligation_totals(connection, user_id)
+        return [self._obligation(row, progress.get(row['id'], 0) + statement_progress.get(row['id'], 0)) for row in rows]
 
     def create_obligation(self, user_id: int, payload: dict) -> Obligation:
         with self.connect() as connection:
             cursor = connection.execute(
-                'INSERT INTO obligations(user_id, label, amount, category_id, cadence, due_day, due_weekday, kind, status) VALUES(:user_id, :label, :amount, :category_id, :cadence, :due_day, :due_weekday, :kind, :status)',
+                'INSERT INTO obligations(user_id, label, amount, category_id, credit_card_id, cadence, due_day, due_weekday, kind, status) VALUES(:user_id, :label, :amount, :category_id, :credit_card_id, :cadence, :due_day, :due_weekday, :kind, :status)',
                 {**payload, 'user_id': user_id},
             )
             row = connection.execute('SELECT * FROM obligations WHERE id = ? AND user_id = ?', (cursor.lastrowid, user_id)).fetchone()
@@ -419,7 +425,7 @@ class Database:
     def update_obligation(self, user_id: int, item_id: int, payload: dict) -> Obligation:
         with self.connect() as connection:
             connection.execute(
-                'UPDATE obligations SET label = :label, amount = :amount, category_id = :category_id, cadence = :cadence, due_day = :due_day, due_weekday = :due_weekday, kind = :kind, status = :status WHERE id = :id AND user_id = :user_id',
+                'UPDATE obligations SET label = :label, amount = :amount, category_id = :category_id, credit_card_id = :credit_card_id, cadence = :cadence, due_day = :due_day, due_weekday = :due_weekday, kind = :kind, status = :status WHERE id = :id AND user_id = :user_id',
                 {**payload, 'id': item_id, 'user_id': user_id},
             )
             row = connection.execute('SELECT * FROM obligations WHERE id = ? AND user_id = ?', (item_id, user_id)).fetchone()
@@ -429,8 +435,127 @@ class Database:
 
     def delete_obligation(self, user_id: int, item_id: int) -> None:
         with self.connect() as connection:
+            connection.execute('DELETE FROM credit_card_statement_items WHERE obligation_id = ? AND statement_id IN (SELECT id FROM credit_card_statements WHERE user_id = ?)', (item_id, user_id))
             connection.execute('UPDATE transactions SET obligation_id = NULL WHERE user_id = ? AND obligation_id = ?', (user_id, item_id))
             connection.execute('DELETE FROM obligations WHERE id = ? AND user_id = ?', (item_id, user_id))
+
+    def list_credit_cards(self, user_id: int) -> list[CreditCard]:
+        with self.connect() as connection:
+            rows = connection.execute('SELECT * FROM credit_cards WHERE user_id = ? ORDER BY label ASC, last4 ASC', (user_id,)).fetchall()
+        return [CreditCard(id=row['id'], label=row['label'], last4=row['last4'], closing_day=row['closing_day'], due_day=row['due_day'], limit_amount=row['limit_amount'], active=bool(row['active'])) for row in rows]
+
+    def create_credit_card(self, user_id: int, payload: dict) -> CreditCard:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                'INSERT INTO credit_cards(user_id, label, last4, closing_day, due_day, limit_amount, active) VALUES(:user_id, :label, :last4, :closing_day, :due_day, :limit_amount, :active)',
+                {**payload, 'user_id': user_id, 'active': 1 if payload['active'] else 0},
+            )
+            row = connection.execute('SELECT * FROM credit_cards WHERE id = ? AND user_id = ?', (cursor.lastrowid, user_id)).fetchone()
+        return CreditCard(id=row['id'], label=row['label'], last4=row['last4'], closing_day=row['closing_day'], due_day=row['due_day'], limit_amount=row['limit_amount'], active=bool(row['active']))
+
+    def update_credit_card(self, user_id: int, item_id: int, payload: dict) -> CreditCard:
+        with self.connect() as connection:
+            connection.execute(
+                'UPDATE credit_cards SET label = :label, last4 = :last4, closing_day = :closing_day, due_day = :due_day, limit_amount = :limit_amount, active = :active WHERE id = :id AND user_id = :user_id',
+                {**payload, 'id': item_id, 'user_id': user_id, 'active': 1 if payload['active'] else 0},
+            )
+            row = connection.execute('SELECT * FROM credit_cards WHERE id = ? AND user_id = ?', (item_id, user_id)).fetchone()
+        if row is None:
+            raise ValueError('Tarjeta no encontrada.')
+        return CreditCard(id=row['id'], label=row['label'], last4=row['last4'], closing_day=row['closing_day'], due_day=row['due_day'], limit_amount=row['limit_amount'], active=bool(row['active']))
+
+    def delete_credit_card(self, user_id: int, item_id: int) -> None:
+        with self.connect() as connection:
+            statement_rows = connection.execute('SELECT id FROM credit_card_statements WHERE user_id = ? AND credit_card_id = ?', (user_id, item_id)).fetchall()
+            statement_ids = [int(row['id']) for row in statement_rows]
+            if statement_ids:
+                placeholders = ','.join('?' for _ in statement_ids)
+                connection.execute(f'UPDATE transactions SET credit_card_statement_id = NULL WHERE user_id = ? AND credit_card_statement_id IN ({placeholders})', (user_id, *statement_ids))
+                connection.execute(f'DELETE FROM credit_card_statement_items WHERE statement_id IN ({placeholders})', tuple(statement_ids))
+                connection.execute(f'DELETE FROM credit_card_statements WHERE id IN ({placeholders}) AND user_id = ?', (*statement_ids, user_id))
+            connection.execute('UPDATE obligations SET credit_card_id = NULL WHERE user_id = ? AND credit_card_id = ?', (user_id, item_id))
+            connection.execute('DELETE FROM credit_cards WHERE id = ? AND user_id = ?', (item_id, user_id))
+
+    def list_credit_card_statements(self, user_id: int) -> list[CreditCardStatement]:
+        with self.connect() as connection:
+            statement_rows = connection.execute(
+                'SELECT statements.*, cards.label AS card_label, cards.last4 AS card_last4, cards.limit_amount AS card_limit_amount FROM credit_card_statements AS statements JOIN credit_cards AS cards ON cards.id = statements.credit_card_id WHERE statements.user_id = ? ORDER BY statements.due_date_iso ASC, statements.id ASC',
+                (user_id,),
+            ).fetchall()
+            item_rows = connection.execute(
+                'SELECT items.statement_id, items.obligation_id, items.amount, obligations.label AS obligation_label FROM credit_card_statement_items AS items JOIN obligations ON obligations.id = items.obligation_id WHERE items.statement_id IN (SELECT id FROM credit_card_statements WHERE user_id = ?) ORDER BY items.id ASC',
+                (user_id,),
+            ).fetchall()
+            payment_rows = connection.execute(
+                'SELECT id, credit_card_statement_id, amount, date_iso FROM transactions WHERE user_id = ? AND credit_card_statement_id IS NOT NULL AND kind = ? ORDER BY date_iso ASC, id ASC',
+                (user_id, 'gasto'),
+            ).fetchall()
+        return self._credit_card_statements_from_rows(statement_rows, item_rows, payment_rows)
+
+    def create_credit_card_statement(self, user_id: int, payload: dict) -> CreditCardStatement:
+        with self.connect() as connection:
+            card = connection.execute('SELECT id FROM credit_cards WHERE id = ? AND user_id = ? LIMIT 1', (payload['credit_card_id'], user_id)).fetchone()
+            if card is None:
+                raise ValueError('Tarjeta no encontrada.')
+            cursor = connection.execute(
+                'INSERT INTO credit_card_statements(user_id, credit_card_id, statement_date_iso, due_date_iso, period_year, period_month, statement_amount, notes) VALUES(:user_id, :credit_card_id, :statement_date_iso, :due_date_iso, :period_year, :period_month, :statement_amount, :notes)',
+                {
+                    'user_id': user_id,
+                    'credit_card_id': payload['credit_card_id'],
+                    'statement_date_iso': payload['statement_date'].isoformat(),
+                    'due_date_iso': payload['due_date'].isoformat(),
+                    'period_year': payload['period_year'],
+                    'period_month': payload['period_month'],
+                    'statement_amount': payload['statement_amount'],
+                    'notes': payload.get('notes', ''),
+                },
+            )
+            for item in payload.get('items', []):
+                obligation = connection.execute('SELECT id FROM obligations WHERE id = ? AND user_id = ? LIMIT 1', (item['obligation_id'], user_id)).fetchone()
+                if obligation is None:
+                    raise ValueError('Obligacion no encontrada para el estado de cuenta.')
+                connection.execute('INSERT INTO credit_card_statement_items(statement_id, obligation_id, amount) VALUES(?, ?, ?)', (cursor.lastrowid, item['obligation_id'], item['amount']))
+        return self.list_credit_card_statements(user_id)[-1]
+
+    def update_credit_card_statement(self, user_id: int, item_id: int, payload: dict) -> CreditCardStatement:
+        with self.connect() as connection:
+            existing = connection.execute('SELECT id FROM credit_card_statements WHERE id = ? AND user_id = ? LIMIT 1', (item_id, user_id)).fetchone()
+            if existing is None:
+                raise ValueError('Estado de cuenta no encontrado.')
+            card = connection.execute('SELECT id FROM credit_cards WHERE id = ? AND user_id = ? LIMIT 1', (payload['credit_card_id'], user_id)).fetchone()
+            if card is None:
+                raise ValueError('Tarjeta no encontrada.')
+            connection.execute(
+                'UPDATE credit_card_statements SET credit_card_id = :credit_card_id, statement_date_iso = :statement_date_iso, due_date_iso = :due_date_iso, period_year = :period_year, period_month = :period_month, statement_amount = :statement_amount, notes = :notes WHERE id = :id AND user_id = :user_id',
+                {
+                    'id': item_id,
+                    'user_id': user_id,
+                    'credit_card_id': payload['credit_card_id'],
+                    'statement_date_iso': payload['statement_date'].isoformat(),
+                    'due_date_iso': payload['due_date'].isoformat(),
+                    'period_year': payload['period_year'],
+                    'period_month': payload['period_month'],
+                    'statement_amount': payload['statement_amount'],
+                    'notes': payload.get('notes', ''),
+                },
+            )
+            connection.execute('DELETE FROM credit_card_statement_items WHERE statement_id = ?', (item_id,))
+            for statement_item in payload.get('items', []):
+                obligation = connection.execute('SELECT id FROM obligations WHERE id = ? AND user_id = ? LIMIT 1', (statement_item['obligation_id'], user_id)).fetchone()
+                if obligation is None:
+                    raise ValueError('Obligacion no encontrada para el estado de cuenta.')
+                connection.execute('INSERT INTO credit_card_statement_items(statement_id, obligation_id, amount) VALUES(?, ?, ?)', (item_id, statement_item['obligation_id'], statement_item['amount']))
+        statements = self.list_credit_card_statements(user_id)
+        statement = next((item for item in statements if item.id == item_id), None)
+        if statement is None:
+            raise ValueError('Estado de cuenta no encontrado.')
+        return statement
+
+    def delete_credit_card_statement(self, user_id: int, item_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute('UPDATE transactions SET credit_card_statement_id = NULL WHERE user_id = ? AND credit_card_statement_id = ?', (user_id, item_id))
+            connection.execute('DELETE FROM credit_card_statement_items WHERE statement_id = ?', (item_id,))
+            connection.execute('DELETE FROM credit_card_statements WHERE id = ? AND user_id = ?', (item_id, user_id))
 
     def list_transactions(self, user_id: int) -> list[Transaction]:
         with self.connect() as connection:
@@ -441,7 +566,7 @@ class Database:
         with self.connect() as connection:
             normalized = self._normalize_transaction_payload(connection, user_id, payload)
             cursor = connection.execute(
-                'INSERT INTO transactions(user_id, kind, amount, wallet, category, fixed_income_source_id, obligation_id, tags_json, notes, date_iso, recurring) VALUES(:user_id, :kind, :amount, :wallet, :category, :fixed_income_source_id, :obligation_id, :tags_json, :notes, :date_iso, :recurring)',
+                'INSERT INTO transactions(user_id, kind, amount, wallet, category, fixed_income_source_id, obligation_id, credit_card_statement_id, tags_json, notes, date_iso, recurring) VALUES(:user_id, :kind, :amount, :wallet, :category, :fixed_income_source_id, :obligation_id, :credit_card_statement_id, :tags_json, :notes, :date_iso, :recurring)',
                 {**normalized, 'user_id': user_id, 'tags_json': json.dumps(normalized['tags']), 'date_iso': normalized['date'].isoformat(), 'recurring': 1 if normalized['recurring'] else 0},
             )
             row = connection.execute('SELECT * FROM transactions WHERE id = ? AND user_id = ?', (cursor.lastrowid, user_id)).fetchone()
@@ -451,7 +576,7 @@ class Database:
         with self.connect() as connection:
             normalized = self._normalize_transaction_payload(connection, user_id, payload)
             connection.execute(
-                'UPDATE transactions SET kind = :kind, amount = :amount, wallet = :wallet, category = :category, fixed_income_source_id = :fixed_income_source_id, obligation_id = :obligation_id, tags_json = :tags_json, notes = :notes, date_iso = :date_iso, recurring = :recurring WHERE id = :id AND user_id = :user_id',
+                'UPDATE transactions SET kind = :kind, amount = :amount, wallet = :wallet, category = :category, fixed_income_source_id = :fixed_income_source_id, obligation_id = :obligation_id, credit_card_statement_id = :credit_card_statement_id, tags_json = :tags_json, notes = :notes, date_iso = :date_iso, recurring = :recurring WHERE id = :id AND user_id = :user_id',
                 {**normalized, 'tags_json': json.dumps(normalized['tags']), 'date_iso': normalized['date'].isoformat(), 'recurring': 1 if normalized['recurring'] else 0, 'id': item_id, 'user_id': user_id},
             )
             row = connection.execute('SELECT * FROM transactions WHERE id = ? AND user_id = ?', (item_id, user_id)).fetchone()
@@ -487,6 +612,9 @@ class Database:
 
     def complete_initial_setup(self, user_id: int, fixed_income_sources: list[dict], obligations: list[dict]) -> None:
         with self.connect() as connection:
+            connection.execute('DELETE FROM credit_card_statement_items WHERE statement_id IN (SELECT id FROM credit_card_statements WHERE user_id = ?)', (user_id,))
+            connection.execute('DELETE FROM credit_card_statements WHERE user_id = ?', (user_id,))
+            connection.execute('DELETE FROM credit_cards WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM fixed_income_sources WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM obligations WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM transactions WHERE user_id = ?', (user_id,))
@@ -497,13 +625,16 @@ class Database:
                 )
             for payload in obligations:
                 connection.execute(
-                    'INSERT INTO obligations(user_id, label, amount, category_id, cadence, due_day, due_weekday, kind, status) VALUES(:user_id, :label, :amount, :category_id, :cadence, :due_day, :due_weekday, :kind, :status)',
+                    'INSERT INTO obligations(user_id, label, amount, category_id, credit_card_id, cadence, due_day, due_weekday, kind, status) VALUES(:user_id, :label, :amount, :category_id, :credit_card_id, :cadence, :due_day, :due_weekday, :kind, :status)',
                     {**payload, 'user_id': user_id},
                 )
             connection.execute('UPDATE users SET setup_complete = 1, updated_at_iso = ? WHERE id = ?', (datetime.now().isoformat(), user_id))
 
     def reset_financial_setup(self, user_id: int) -> None:
         with self.connect() as connection:
+            connection.execute('DELETE FROM credit_card_statement_items WHERE statement_id IN (SELECT id FROM credit_card_statements WHERE user_id = ?)', (user_id,))
+            connection.execute('DELETE FROM credit_card_statements WHERE user_id = ?', (user_id,))
+            connection.execute('DELETE FROM credit_cards WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM transactions WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM obligations WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM fixed_income_sources WHERE user_id = ?', (user_id,))
@@ -562,6 +693,31 @@ class Database:
         ).fetchall()
         return {int(row['linked_id']): float(row['total'] or 0) for row in rows}
 
+    def _current_period_credit_card_obligation_totals(self, connection: sqlite3.Connection, user_id: int) -> dict[int, float]:
+        now = datetime.now()
+        statement_rows = connection.execute(
+            'SELECT statements.*, cards.label AS card_label, cards.last4 AS card_last4, cards.limit_amount AS card_limit_amount FROM credit_card_statements AS statements JOIN credit_cards AS cards ON cards.id = statements.credit_card_id WHERE statements.user_id = ? AND statements.period_year = ? AND statements.period_month = ? ORDER BY statements.id ASC',
+            (user_id, now.year, now.month),
+        ).fetchall()
+        if not statement_rows:
+            return {}
+        statement_ids = [int(row['id']) for row in statement_rows]
+        placeholders = ','.join('?' for _ in statement_ids)
+        item_rows = connection.execute(
+            f'SELECT items.statement_id, items.obligation_id, items.amount, obligations.label AS obligation_label FROM credit_card_statement_items AS items JOIN obligations ON obligations.id = items.obligation_id WHERE items.statement_id IN ({placeholders}) ORDER BY items.id ASC',
+            tuple(statement_ids),
+        ).fetchall()
+        payment_rows = connection.execute(
+            f'SELECT id, credit_card_statement_id, amount, date_iso FROM transactions WHERE user_id = ? AND credit_card_statement_id IN ({placeholders}) AND kind = ? ORDER BY date_iso ASC, id ASC',
+            (user_id, *statement_ids, 'gasto'),
+        ).fetchall()
+        totals: dict[int, float] = {}
+        for statement in self._credit_card_statements_from_rows(statement_rows, item_rows, payment_rows):
+            _, _, _, obligation_paid = self._statement_payment_breakdown(statement.items, payment_rows, statement.id)
+            for obligation_id, amount in obligation_paid.items():
+                totals[obligation_id] = totals.get(obligation_id, 0) + amount
+        return totals
+
     @staticmethod
     def _current_period_bounds() -> tuple[str, str]:
         now = datetime.now()
@@ -583,8 +739,10 @@ class Database:
         normalized = dict(payload)
         fixed_income_source_id = normalized.get('fixed_income_source_id')
         obligation_id = normalized.get('obligation_id')
-        if fixed_income_source_id and obligation_id:
-            raise ValueError('Un movimiento no puede vincularse a ingreso fijo y obligacion al mismo tiempo.')
+        credit_card_statement_id = normalized.get('credit_card_statement_id')
+        linked_targets = [value for value in (fixed_income_source_id, obligation_id, credit_card_statement_id) if value is not None]
+        if len(linked_targets) > 1:
+            raise ValueError('Un movimiento solo puede vincularse a una fuente fija, una obligacion o un estado de tarjeta a la vez.')
         if fixed_income_source_id is not None:
             if normalized['kind'] != 'ingreso':
                 raise ValueError('Solo un ingreso puede vincularse a un ingreso fijo.')
@@ -597,6 +755,12 @@ class Database:
             row = connection.execute('SELECT id FROM obligations WHERE id = ? AND user_id = ? LIMIT 1', (obligation_id, user_id)).fetchone()
             if row is None:
                 raise ValueError('Obligacion no encontrada.')
+        if credit_card_statement_id is not None:
+            if normalized['kind'] != 'gasto':
+                raise ValueError('Solo un gasto puede vincularse a un estado de tarjeta.')
+            row = connection.execute('SELECT id FROM credit_card_statements WHERE id = ? AND user_id = ? LIMIT 1', (credit_card_statement_id, user_id)).fetchone()
+            if row is None:
+                raise ValueError('Estado de cuenta no encontrado.')
         return normalized
 
     @staticmethod
@@ -608,11 +772,73 @@ class Database:
     def _obligation(self, row: sqlite3.Row, recorded_amount: float = 0) -> Obligation:
         expected_amount = float(row['amount']) * {'weekly': 4, 'biweekly': 2}.get(row['cadence'], 1)
         settled_amount = min(max(recorded_amount, 0), expected_amount)
-        return Obligation(id=row['id'], label=row['label'], amount=row['amount'], category_id=row['category_id'], cadence=row['cadence'], due_day=row['due_day'], due_weekday=row['due_weekday'], kind=row['kind'], status=row['status'], current_period_expected_amount=expected_amount, current_period_recorded_amount=settled_amount, current_period_balance=max(expected_amount - settled_amount, 0), current_period_status=self._period_status(settled_amount, expected_amount))
+        return Obligation(id=row['id'], label=row['label'], amount=row['amount'], category_id=row['category_id'], credit_card_id=row['credit_card_id'], cadence=row['cadence'], due_day=row['due_day'], due_weekday=row['due_weekday'], kind=row['kind'], status=row['status'], current_period_expected_amount=expected_amount, current_period_recorded_amount=settled_amount, current_period_balance=max(expected_amount - settled_amount, 0), current_period_status=self._period_status(settled_amount, expected_amount))
 
     @staticmethod
     def _transaction(row: sqlite3.Row) -> Transaction:
-        return Transaction(id=row['id'], kind=row['kind'], amount=row['amount'], wallet=row['wallet'], category=row['category'], fixed_income_source_id=row['fixed_income_source_id'], obligation_id=row['obligation_id'], tags=json.loads(row['tags_json']), notes=row['notes'], date=datetime.fromisoformat(row['date_iso']), recurring=bool(row['recurring']))
+        return Transaction(id=row['id'], kind=row['kind'], amount=row['amount'], wallet=row['wallet'], category=row['category'], fixed_income_source_id=row['fixed_income_source_id'], obligation_id=row['obligation_id'], credit_card_statement_id=row['credit_card_statement_id'], tags=json.loads(row['tags_json']), notes=row['notes'], date=datetime.fromisoformat(row['date_iso']), recurring=bool(row['recurring']))
+
+    def _credit_card_statements_from_rows(self, statement_rows: list[sqlite3.Row], item_rows: list[sqlite3.Row], payment_rows: list[sqlite3.Row]) -> list[CreditCardStatement]:
+        items_by_statement: dict[int, list[CreditCardStatementItem]] = {}
+        for row in item_rows:
+            items_by_statement.setdefault(int(row['statement_id']), []).append(CreditCardStatementItem(obligation_id=int(row['obligation_id']), obligation_label=str(row['obligation_label']), amount=float(row['amount'])))
+
+        statements: list[CreditCardStatement] = []
+        for row in statement_rows:
+            statement_id = int(row['id'])
+            items = items_by_statement.get(statement_id, [])
+            fixed_paid_amount, personal_paid_amount, _, _ = self._statement_payment_breakdown(items, payment_rows, statement_id)
+            paid_amount = sum(float(payment['amount']) for payment in payment_rows if int(payment['credit_card_statement_id']) == statement_id)
+            remaining_amount = max(float(row['statement_amount']) - paid_amount, 0)
+            payment_status = 'Pagado' if remaining_amount <= 0 else 'Parcial' if paid_amount > 0 else 'Pendiente'
+            statements.append(
+                CreditCardStatement(
+                    id=statement_id,
+                    credit_card_id=int(row['credit_card_id']),
+                    statement_date=datetime.fromisoformat(str(row['statement_date_iso'])).date(),
+                    due_date=datetime.fromisoformat(str(row['due_date_iso'])).date(),
+                    period_year=int(row['period_year']),
+                    period_month=int(row['period_month']),
+                    statement_amount=float(row['statement_amount']),
+                    notes=str(row['notes'] or ''),
+                    card_label=str(row['card_label']),
+                    card_last4=str(row['card_last4']),
+                    paid_amount=paid_amount,
+                    remaining_amount=remaining_amount,
+                    fixed_items_total=sum(item.amount for item in items),
+                    fixed_items_paid_amount=fixed_paid_amount,
+                    personal_paid_amount=personal_paid_amount,
+                    payment_status=payment_status,
+                    utilization_ratio=0 if not float(row['card_limit_amount'] or 0) else float(row['statement_amount']) / float(row['card_limit_amount']),
+                    items=items,
+                )
+            )
+        return statements
+
+    @staticmethod
+    def _statement_payment_breakdown(items: list[CreditCardStatementItem], payment_rows: list[sqlite3.Row], statement_id: int) -> tuple[float, float, dict[int, float], dict[int, float]]:
+        relevant_payments = [row for row in payment_rows if int(row['credit_card_statement_id']) == statement_id]
+        remaining_fixed_total = sum(item.amount for item in items)
+        fixed_paid_amount = 0.0
+        personal_paid_amount = 0.0
+        personal_by_transaction: dict[int, float] = {}
+        for payment in relevant_payments:
+            amount = float(payment['amount'])
+            fixed_portion = min(amount, max(remaining_fixed_total, 0))
+            remaining_fixed_total = max(remaining_fixed_total - fixed_portion, 0)
+            fixed_paid_amount += fixed_portion
+            personal_portion = max(amount - fixed_portion, 0)
+            personal_paid_amount += personal_portion
+            personal_by_transaction[int(payment['id'])] = personal_portion
+
+        remaining_fixed_paid = fixed_paid_amount
+        obligation_paid: dict[int, float] = {}
+        for item in items:
+            applied = min(item.amount, remaining_fixed_paid)
+            if applied > 0:
+                obligation_paid[item.obligation_id] = obligation_paid.get(item.obligation_id, 0) + applied
+                remaining_fixed_paid -= applied
+        return fixed_paid_amount, personal_paid_amount, personal_by_transaction, obligation_paid
 
     @staticmethod
     def _tag(row: sqlite3.Row) -> TagConfig:

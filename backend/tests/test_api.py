@@ -1,6 +1,7 @@
 import os
 import json
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -396,6 +397,150 @@ def test_tag_command_preset_roundtrip_in_bootstrap() -> None:
     assert tag['preset_amount'] == 2000
     assert tag['preset_wallet'] == 'Efectivo'
     assert tag['preset_category'] == 'Casa'
+
+
+def test_credit_card_statement_payment_splits_fixed_and_personal() -> None:
+    headers = ensure_app_headers('cardflow', '1234')
+    setup = client.post(
+        '/api/setup/complete',
+        json={
+            'fixed_income_sources': [
+                {
+                    'label': 'Nomina base',
+                    'amount': 10000,
+                    'cadence': 'monthly',
+                    'expected_day': 30,
+                    'expected_weekday': None,
+                    'wallet': 'Banco',
+                    'active': True,
+                }
+            ],
+            'obligations': [
+                {
+                    'label': 'Internet',
+                    'amount': 1800,
+                    'category_id': 'casa',
+                    'credit_card_id': None,
+                    'cadence': 'monthly',
+                    'due_day': 10,
+                    'due_weekday': None,
+                    'kind': 'Fija',
+                    'status': 'Pendiente',
+                },
+                {
+                    'label': 'Luz',
+                    'amount': 1200,
+                    'category_id': 'luz',
+                    'credit_card_id': None,
+                    'cadence': 'monthly',
+                    'due_day': 12,
+                    'due_weekday': None,
+                    'kind': 'Fija',
+                    'status': 'Pendiente',
+                },
+            ],
+        },
+        headers=headers,
+    )
+    assert setup.status_code == 200
+
+    create_card = client.post(
+        '/api/credit-cards',
+        json={
+            'label': 'Popular',
+            'last4': '1100',
+            'closing_day': 25,
+            'due_day': 15,
+            'limit_amount': 10000,
+            'active': True,
+        },
+        headers=headers,
+    )
+    assert create_card.status_code == 200
+    credit_card_id = create_card.json()['id']
+
+    bootstrap = client.get('/api/bootstrap', headers=headers)
+    payload = bootstrap.json()
+    internet = next(item for item in payload['obligations'] if item['label'] == 'Internet')
+    luz = next(item for item in payload['obligations'] if item['label'] == 'Luz')
+
+    for obligation in (internet, luz):
+        update_obligation = client.put(
+            f"/api/obligations/{obligation['id']}",
+            json={
+                'label': obligation['label'],
+                'amount': obligation['amount'],
+                'category_id': obligation['category_id'],
+                'credit_card_id': credit_card_id,
+                'cadence': obligation['cadence'],
+                'due_day': obligation['due_day'],
+                'due_weekday': obligation['due_weekday'],
+                'kind': obligation['kind'],
+                'status': obligation['status'],
+            },
+            headers=headers,
+        )
+        assert update_obligation.status_code == 200
+
+    now = datetime.now()
+    due_date = (now + timedelta(days=2)).date().isoformat()
+    statement = client.post(
+        '/api/credit-card-statements',
+        json={
+            'credit_card_id': credit_card_id,
+            'statement_date': now.date().isoformat(),
+            'due_date': due_date,
+            'period_year': now.year,
+            'period_month': now.month,
+            'statement_amount': 5000,
+            'notes': 'Estado principal',
+            'items': [
+                {'obligation_id': internet['id'], 'amount': 1800},
+                {'obligation_id': luz['id'], 'amount': 1200},
+            ],
+        },
+        headers=headers,
+    )
+    assert statement.status_code == 200
+    statement_id = statement.json()['id']
+
+    before_payment = client.get('/api/bootstrap', headers=headers).json()
+    assert before_payment['dashboard']['credit_card_alerts']
+    assert before_payment['credit_card_statements'][0]['remaining_amount'] == 5000
+
+    payment = client.post(
+        '/api/transactions',
+        json={
+            'kind': 'gasto',
+            'amount': 5000,
+            'wallet': 'Banco',
+            'category': 'Pago TC 1100',
+            'fixed_income_source_id': None,
+            'obligation_id': None,
+            'credit_card_statement_id': statement_id,
+            'tags': [],
+            'notes': 'Pago total de la tarjeta',
+            'date': now.replace(hour=11, minute=0, second=0, microsecond=0).isoformat(),
+            'recurring': False,
+        },
+        headers=headers,
+    )
+    assert payment.status_code == 200
+
+    refreshed = client.get('/api/bootstrap', headers=headers).json()
+    refreshed_internet = next(item for item in refreshed['obligations'] if item['label'] == 'Internet')
+    refreshed_luz = next(item for item in refreshed['obligations'] if item['label'] == 'Luz')
+    statement_view = next(item for item in refreshed['credit_card_statements'] if item['id'] == statement_id)
+    personal_bucket = next(item for item in refreshed['dashboard']['bucket_overviews'] if item['label'] == 'Personal')
+
+    assert refreshed_internet['current_period_recorded_amount'] == 1800
+    assert refreshed_luz['current_period_recorded_amount'] == 1200
+    assert statement_view['paid_amount'] == 5000
+    assert statement_view['remaining_amount'] == 0
+    assert statement_view['personal_paid_amount'] == 2000
+    assert refreshed['dashboard']['personal_spent_this_month'] == 2000
+    assert personal_bucket['reserved'] == 2000
+    assert refreshed['dashboard']['credit_card_alerts'] == []
 
 
 def test_theme_preference_and_hard_deletes() -> None:

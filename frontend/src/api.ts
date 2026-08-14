@@ -4,6 +4,8 @@ import type {
   BootstrapResponse,
   CategoryConfig,
   CategoryConfigInput,
+  CreditCardInput,
+  CreditCardStatementInput,
   FixedIncomeSourceInput,
   FlutterImportSummary,
   InitialSetupPayload,
@@ -108,6 +110,12 @@ export const deleteFixedIncomeSource = (id: number) => request(`/fixed-income-so
 export const createObligation = (payload: ObligationInput) => request('/obligations', { method: 'POST', body: JSON.stringify(payload) })
 export const updateObligation = (id: number, payload: ObligationInput) => request(`/obligations/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
 export const deleteObligation = (id: number) => request(`/obligations/${id}`, { method: 'DELETE' })
+export const createCreditCard = (payload: CreditCardInput) => request('/credit-cards', { method: 'POST', body: JSON.stringify(payload) })
+export const updateCreditCard = (id: number, payload: CreditCardInput) => request(`/credit-cards/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+export const deleteCreditCard = (id: number) => request(`/credit-cards/${id}`, { method: 'DELETE' })
+export const createCreditCardStatement = (payload: CreditCardStatementInput) => request('/credit-card-statements', { method: 'POST', body: JSON.stringify(payload) })
+export const updateCreditCardStatement = (id: number, payload: CreditCardStatementInput) => request(`/credit-card-statements/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+export const deleteCreditCardStatement = (id: number) => request(`/credit-card-statements/${id}`, { method: 'DELETE' })
 export const completeInitialSetup = (payload: InitialSetupPayload) => request<BootstrapResponse>('/setup/complete', { method: 'POST', body: JSON.stringify(payload) })
 export const resetInitialSetup = () => request<void>('/setup/reset', { method: 'POST' })
 export const deleteCategory = (id: string) => request<void>(`/categories/${id}`, { method: 'DELETE' })

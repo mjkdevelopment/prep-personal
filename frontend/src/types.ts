@@ -22,6 +22,7 @@ export interface Obligation {
   label: string
   amount: number
   category_id: string | null
+  credit_card_id: number | null
   cadence: FixedIncomeCadence
   due_day: number
   due_weekday: number | null
@@ -41,10 +42,60 @@ export interface Transaction {
   category: string
   fixed_income_source_id: number | null
   obligation_id: number | null
+  credit_card_statement_id: number | null
   tags: string[]
   notes: string
   date: string
   recurring: boolean
+}
+
+export interface CreditCard {
+  id: number
+  label: string
+  last4: string
+  closing_day: number
+  due_day: number
+  limit_amount: number
+  active: boolean
+}
+
+export interface CreditCardStatementItem {
+  obligation_id: number
+  obligation_label: string
+  amount: number
+}
+
+export interface CreditCardStatement {
+  id: number
+  credit_card_id: number
+  statement_date: string
+  due_date: string
+  period_year: number
+  period_month: number
+  statement_amount: number
+  notes: string
+  card_label: string
+  card_last4: string
+  paid_amount: number
+  remaining_amount: number
+  fixed_items_total: number
+  fixed_items_paid_amount: number
+  personal_paid_amount: number
+  payment_status: string
+  utilization_ratio: number
+  items: CreditCardStatementItem[]
+}
+
+export interface CreditCardAlert {
+  statement_id: number
+  credit_card_id: number
+  card_label: string
+  card_last4: string
+  title: string
+  detail: string
+  severity: string
+  days_until_due: number
+  remaining_amount: number
 }
 
 export interface CategoryConfig {
@@ -139,6 +190,7 @@ export interface DashboardSummary {
   wallet_balances: WalletBalanceView[]
   bucket_overviews: BucketOverview[]
   expense_comparisons: CategorySpendComparison[]
+  credit_card_alerts: CreditCardAlert[]
   generated_insights: InsightView[]
 }
 
@@ -153,6 +205,8 @@ export interface BootstrapResponse {
   audit_events: AuditEvent[]
   fixed_income_sources: FixedIncomeSource[]
   obligations: Obligation[]
+  credit_cards: CreditCard[]
+  credit_card_statements: CreditCardStatement[]
   transactions: Transaction[]
   categories: CategoryConfig[]
   tags: TagConfig[]
@@ -236,10 +290,20 @@ export interface TransactionInput {
   category: string
   fixed_income_source_id: number | null
   obligation_id: number | null
+  credit_card_statement_id: number | null
   tags: string[]
   notes: string
   date: string
   recurring: boolean
+}
+
+export interface CreditCardInput {
+  label: string
+  last4: string
+  closing_day: number
+  due_day: number
+  limit_amount: number
+  active: boolean
 }
 
 export interface FixedIncomeSourceInput {
@@ -256,9 +320,26 @@ export interface ObligationInput {
   label: string
   amount: number
   category_id: string | null
+  credit_card_id: number | null
   cadence: FixedIncomeCadence
   due_day: number
   due_weekday: number | null
   kind: string
   status: string
+}
+
+export interface CreditCardStatementItemInput {
+  obligation_id: number
+  amount: number
+}
+
+export interface CreditCardStatementInput {
+  credit_card_id: number | null
+  statement_date: string
+  due_date: string
+  period_year: number
+  period_month: number
+  statement_amount: number
+  notes: string
+  items: CreditCardStatementItemInput[]
 }

@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .database import Database, UserRecord
 from .importer import import_flutter_database
-from .schemas import AdminBootstrapRequest, AuthStatus, CategoryConfigInput, FixedIncomeSourceCreate, FlutterImportSummary, InitialSetupPayload, LoginRequest, LoginResponse, ObligationCreate, OwnerPanelResponse, PasswordChangeRequest, TagConfigInput, ThemePreferenceUpdate, TransactionCreate, UserAccessUpdateRequest, UserCreateRequest
+from .schemas import AdminBootstrapRequest, AuthStatus, CategoryConfigInput, CreditCardCreate, CreditCardStatementCreate, FixedIncomeSourceCreate, FlutterImportSummary, InitialSetupPayload, LoginRequest, LoginResponse, ObligationCreate, OwnerPanelResponse, PasswordChangeRequest, TagConfigInput, ThemePreferenceUpdate, TransactionCreate, UserAccessUpdateRequest, UserCreateRequest
 from .services import FinancialSnapshot, build_bootstrap, suggest_income_allocation
 
 
@@ -109,10 +109,12 @@ app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_credentials=True, 
 def current_state(user_id: int):
     fixed_income_sources = database.list_fixed_income_sources(user_id)
     obligations = database.list_obligations(user_id)
+    credit_cards = database.list_credit_cards(user_id)
+    credit_card_statements = database.list_credit_card_statements(user_id)
     transactions = database.list_transactions(user_id)
     categories = database.list_categories(user_id)
     tags = database.list_tags(user_id)
-    return fixed_income_sources, obligations, transactions, categories, tags
+    return fixed_income_sources, obligations, credit_cards, credit_card_statements, transactions, categories, tags
 
 
 def require_auth(x_session_token: str | None = Header(default=None)) -> UserRecord:
@@ -260,7 +262,7 @@ def bootstrap(user: UserRecord = Depends(require_app_user)):
 
 @app.get('/api/suggestions/income')
 def income_suggestion(amount: float, user: UserRecord = Depends(require_app_user)):
-    fixed_income_sources, obligations, transactions, _, _ = current_state(user.id)
+    fixed_income_sources, obligations, _, _, transactions, _, _ = current_state(user.id)
     snapshot = FinancialSnapshot(fixed_income_expected=sum(item.amount for item in fixed_income_sources if item.active), income_reported=sum(item.amount for item in transactions if item.kind == 'ingreso'), pending_obligations=sum(item.amount for item in obligations if item.status != 'Cubierto'))
     return suggest_income_allocation(amount, snapshot)
 
@@ -299,6 +301,46 @@ def update_obligation(item_id: int, payload: ObligationCreate, user: UserRecord 
 @app.delete('/api/obligations/{item_id}', status_code=204)
 def delete_obligation(item_id: int, user: UserRecord = Depends(require_editor)):
     database.delete_obligation(user.id, item_id)
+
+
+@app.post('/api/credit-cards')
+def create_credit_card(payload: CreditCardCreate, user: UserRecord = Depends(require_editor)):
+    return database.create_credit_card(user.id, payload.model_dump())
+
+
+@app.put('/api/credit-cards/{item_id}')
+def update_credit_card(item_id: int, payload: CreditCardCreate, user: UserRecord = Depends(require_editor)):
+    try:
+        return database.update_credit_card(user.id, item_id, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete('/api/credit-cards/{item_id}', status_code=204)
+def delete_credit_card(item_id: int, user: UserRecord = Depends(require_editor)):
+    database.delete_credit_card(user.id, item_id)
+
+
+@app.post('/api/credit-card-statements')
+def create_credit_card_statement(payload: CreditCardStatementCreate, user: UserRecord = Depends(require_editor)):
+    try:
+        return database.create_credit_card_statement(user.id, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put('/api/credit-card-statements/{item_id}')
+def update_credit_card_statement(item_id: int, payload: CreditCardStatementCreate, user: UserRecord = Depends(require_editor)):
+    try:
+        return database.update_credit_card_statement(user.id, item_id, payload.model_dump())
+    except ValueError as exc:
+        status_code = 404 if 'no encontrado' in str(exc).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@app.delete('/api/credit-card-statements/{item_id}', status_code=204)
+def delete_credit_card_statement(item_id: int, user: UserRecord = Depends(require_editor)):
+    database.delete_credit_card_statement(user.id, item_id)
 
 
 @app.post('/api/transactions')

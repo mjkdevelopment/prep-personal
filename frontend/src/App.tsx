@@ -5,11 +5,15 @@ import {
   changePassword,
   clearSessionToken,
   completeInitialSetup,
+  createCreditCard,
+  createCreditCardStatement,
   createUser,
   createFixedIncomeSource,
   createObligation,
   createTransaction,
   deleteCategory,
+  deleteCreditCard,
+  deleteCreditCardStatement,
   deleteFixedIncomeSource,
   deleteObligation,
   deleteTag,
@@ -26,6 +30,8 @@ import {
   resetInitialSetup,
   updateThemePreference,
   updateUserAccess,
+  updateCreditCard,
+  updateCreditCardStatement,
   updateFixedIncomeSource,
   updateObligation,
   updateTransaction,
@@ -40,6 +46,10 @@ import type {
   BootstrapResponse,
   CategoryConfig,
   CategoryConfigInput,
+  CreditCard,
+  CreditCardInput,
+  CreditCardStatement,
+  CreditCardStatementInput,
   FixedIncomeCadence,
   FixedIncomeSource,
   FixedIncomeSourceInput,
@@ -61,6 +71,18 @@ import { colorTokens, iconGlyph, iconLabel, iconTokens, slugify, tokenColor } fr
 
 type AppTab = 'dashboard' | 'transactions' | 'base' | 'settings'
 type LinkedSettlementMode = 'partial' | 'complete'
+
+const formatDateOnlyValue = (value: Date | string): string => {
+  const date = typeof value === 'string' ? new Date(value) : value
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+const cardCycleDueDate = (statementDate: string, dueDay: number): string => {
+  const base = statementDate ? new Date(`${statementDate}T00:00:00`) : new Date()
+  const nextMonth = new Date(base.getFullYear(), base.getMonth() + 1, 1)
+  const lastDay = new Date(nextMonth.getFullYear(), nextMonth.getMonth() + 1, 0).getDate()
+  return formatDateOnlyValue(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), Math.min(dueDay, lastDay)))
+}
 
 const appTabs: Array<{ id: AppTab; label: string }> = [
   { id: 'dashboard', label: 'Resumen' },
@@ -160,6 +182,7 @@ const emptyTransaction = (wallet = 'Banco', category = ''): TransactionInput => 
   category,
   fixed_income_source_id: null,
   obligation_id: null,
+  credit_card_statement_id: null,
   tags: [],
   notes: '',
   date: formatDateInput(new Date().toISOString()),
@@ -180,12 +203,36 @@ const emptyObligation = (categoryId = 'casa'): ObligationInput => ({
   label: '',
   amount: 0,
   category_id: categoryId,
+  credit_card_id: null,
   cadence: 'monthly',
   due_day: 15,
   due_weekday: null,
   kind: 'Fija',
   status: 'Pendiente',
 })
+
+const emptyCreditCard = (): CreditCardInput => ({
+  label: '',
+  last4: '',
+  closing_day: 25,
+  due_day: 15,
+  limit_amount: 0,
+  active: true,
+})
+
+const emptyCreditCardStatement = (): CreditCardStatementInput => {
+  const now = new Date()
+  return {
+    credit_card_id: null,
+    statement_date: formatDateOnlyValue(now),
+    due_date: formatDateOnlyValue(new Date(now.getFullYear(), now.getMonth() + 1, 15)),
+    period_year: now.getFullYear(),
+    period_month: now.getMonth() + 1,
+    statement_amount: 0,
+    notes: '',
+    items: [],
+  }
+}
 
 const emptyCategory = (scope: 'income' | 'expense' = 'expense'): CategoryConfigInput => ({
   id: '',
@@ -446,6 +493,8 @@ function App() {
   const [transactionForm, setTransactionForm] = useState<TransactionInput>(emptyTransaction())
   const [fixedIncomeForm, setFixedIncomeForm] = useState<FixedIncomeSourceInput>(emptyFixedIncome())
   const [obligationForm, setObligationForm] = useState<ObligationInput>(emptyObligation())
+  const [creditCardForm, setCreditCardForm] = useState<CreditCardInput>(emptyCreditCard())
+  const [creditCardStatementForm, setCreditCardStatementForm] = useState<CreditCardStatementInput>(emptyCreditCardStatement())
   const [categoryForm, setCategoryForm] = useState<CategoryConfigInput>(emptyCategory())
   const [tagForm, setTagForm] = useState<TagConfigInput>(emptyTag())
   const [tagCommandInput, setTagCommandInput] = useState('')
@@ -456,6 +505,8 @@ function App() {
   const [editingTransactionId, setEditingTransactionId] = useState<number | null>(null)
   const [editingFixedIncomeId, setEditingFixedIncomeId] = useState<number | null>(null)
   const [editingObligationId, setEditingObligationId] = useState<number | null>(null)
+  const [editingCreditCardId, setEditingCreditCardId] = useState<number | null>(null)
+  const [editingCreditCardStatementId, setEditingCreditCardStatementId] = useState<number | null>(null)
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [editingTagId, setEditingTagId] = useState<string | null>(null)
   const [suggestion, setSuggestion] = useState<AllocationSuggestion | null>(null)
@@ -701,6 +752,8 @@ function App() {
       const payload: TransactionInput = normalizedCommandTag && !transactionForm.tags.some((item) => sameTagLabel(item, normalizedCommandTag))
         ? { ...transactionForm, tags: [...transactionForm.tags, existingCommandTag?.label ?? normalizedCommandTag] }
         : transactionForm
+      const selectedStatement = data?.credit_card_statements.find((item) => item.id === payload.credit_card_statement_id) ?? null
+      const selectedCard = data?.credit_cards.find((item) => item.id === selectedStatement?.credit_card_id) ?? null
 
       if (saveAsCommandTag) {
         if (!normalizedCommandTag) {
@@ -735,6 +788,10 @@ function App() {
       setSaveAsCommandTag(false)
       setEditingTransactionId(null)
       await load()
+      if (!editingTransactionId && selectedStatement && selectedCard) {
+        const ratio = selectedCard.limit_amount <= 0 ? 0 : selectedStatement.statement_amount / selectedCard.limit_amount
+        window.alert(ratio <= 0.3 ? `La TC ${selectedCard.last4} quedo en una zona manejable frente a su limite.` : `La TC ${selectedCard.last4} uso una parte alta de su limite en este ciclo. Conviene vigilarla.`)
+      }
     } catch (submitError) {
       setError(resolveErrorMessage(submitError, 'No se pudo guardar el movimiento.'))
     } finally {
@@ -777,6 +834,52 @@ function App() {
       await load()
     } catch (submitError) {
       setError(resolveErrorMessage(submitError, 'No se pudo guardar el gasto fijo.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCreditCardSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      const payload = { ...creditCardForm, last4: creditCardForm.last4.trim().slice(-4) }
+      if (editingCreditCardId) {
+        await updateCreditCard(editingCreditCardId, payload)
+      } else {
+        await createCreditCard(payload)
+      }
+      setCreditCardForm(emptyCreditCard())
+      setEditingCreditCardId(null)
+      await load()
+    } catch (submitError) {
+      setError(resolveErrorMessage(submitError, 'No se pudo guardar la tarjeta.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCreditCardStatementSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      if (!creditCardStatementForm.credit_card_id) {
+        throw new Error('Selecciona primero una tarjeta para el estado de cuenta.')
+      }
+      const payload = {
+        ...creditCardStatementForm,
+        items: creditCardStatementForm.items.filter((item) => item.amount > 0),
+      }
+      if (editingCreditCardStatementId) {
+        await updateCreditCardStatement(editingCreditCardStatementId, payload)
+      } else {
+        await createCreditCardStatement(payload)
+      }
+      setCreditCardStatementForm(emptyCreditCardStatement())
+      setEditingCreditCardStatementId(null)
+      await load()
+    } catch (submitError) {
+      setError(resolveErrorMessage(submitError, 'No se pudo guardar el estado de cuenta.'))
     } finally {
       setSaving(false)
     }
@@ -848,6 +951,8 @@ function App() {
       setTransactionForm(emptyTransaction(defaultWallet, defaultIncomeCategory))
       setFixedIncomeForm(emptyFixedIncome(defaultWallet))
       setObligationForm(emptyObligation(defaultExpenseCategoryId))
+      setCreditCardForm(emptyCreditCard())
+      setCreditCardStatementForm(emptyCreditCardStatement())
       await load()
     } catch (resetError) {
       setError(resolveErrorMessage(resetError, 'No se pudo reiniciar la configuracion.'))
@@ -1057,6 +1162,7 @@ function App() {
                 category: tag.preset_category ?? current.category,
                 fixed_income_source_id: nextKind === 'ingreso' ? (tag.preset_fixed_income_source_id ?? current.fixed_income_source_id) : null,
                 obligation_id: nextKind === 'gasto' ? (tag.preset_obligation_id ?? current.obligation_id) : null,
+                credit_card_statement_id: null,
                 tags: nextTags,
                 date: formatDateInput(new Date().toISOString()),
                 recurring: tag.preset_recurring ?? current.recurring,
@@ -1074,18 +1180,43 @@ function App() {
           setFixedIncomeForm={setFixedIncomeForm}
           obligationForm={obligationForm}
           setObligationForm={setObligationForm}
+          creditCardForm={creditCardForm}
+          setCreditCardForm={setCreditCardForm}
+          creditCardStatementForm={creditCardStatementForm}
+          setCreditCardStatementForm={setCreditCardStatementForm}
           editingFixedIncomeId={editingFixedIncomeId}
           editingObligationId={editingObligationId}
+          editingCreditCardId={editingCreditCardId}
+          editingCreditCardStatementId={editingCreditCardStatementId}
           expenseCategories={expenseCategories}
           onFixedIncomeSubmit={handleFixedIncomeSubmit}
           onObligationSubmit={handleObligationSubmit}
+          onCreditCardSubmit={handleCreditCardSubmit}
+          onCreditCardStatementSubmit={handleCreditCardStatementSubmit}
           onEditFixedIncome={(item) => {
             setEditingFixedIncomeId(item.id)
             setFixedIncomeForm({ label: item.label, amount: item.amount, cadence: item.cadence, expected_day: item.expected_day, expected_weekday: item.expected_weekday, wallet: item.wallet, active: item.active })
           }}
           onEditObligation={(item) => {
             setEditingObligationId(item.id)
-            setObligationForm({ label: item.label, amount: item.amount, category_id: item.category_id, cadence: item.cadence, due_day: item.due_day, due_weekday: item.due_weekday, kind: item.kind, status: item.status })
+            setObligationForm({ label: item.label, amount: item.amount, category_id: item.category_id, credit_card_id: item.credit_card_id, cadence: item.cadence, due_day: item.due_day, due_weekday: item.due_weekday, kind: item.kind, status: item.status })
+          }}
+          onEditCreditCard={(item) => {
+            setEditingCreditCardId(item.id)
+            setCreditCardForm({ label: item.label, last4: item.last4, closing_day: item.closing_day, due_day: item.due_day, limit_amount: item.limit_amount, active: item.active })
+          }}
+          onEditCreditCardStatement={(item) => {
+            setEditingCreditCardStatementId(item.id)
+            setCreditCardStatementForm({
+              credit_card_id: item.credit_card_id,
+              statement_date: item.statement_date.slice(0, 10),
+              due_date: item.due_date.slice(0, 10),
+              period_year: item.period_year,
+              period_month: item.period_month,
+              statement_amount: item.statement_amount,
+              notes: item.notes,
+              items: item.items.map((statementItem) => ({ obligation_id: statementItem.obligation_id, amount: statementItem.amount })),
+            })
           }}
           onDeleteFixedIncome={async (id) => {
             await deleteFixedIncomeSource(id)
@@ -1093,6 +1224,14 @@ function App() {
           }}
           onDeleteObligation={async (id) => {
             await deleteObligation(id)
+            await load()
+          }}
+          onDeleteCreditCard={async (id) => {
+            await deleteCreditCard(id)
+            await load()
+          }}
+          onDeleteCreditCardStatement={async (id) => {
+            await deleteCreditCardStatement(id)
             await load()
           }}
         />
@@ -1331,6 +1470,23 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
           </div>
         </Panel>
       </section>
+      {data.dashboard.credit_card_alerts.length > 0 ? (
+        <section className="bottom-grid single-wide">
+          <Panel title="Alertas de tarjetas" subtitle="Seguimiento de fechas limite cercanas.">
+            <div className="insight-grid">
+              {data.dashboard.credit_card_alerts.map((alert) => (
+                <article key={alert.statement_id} className={`insight-card insight-${alert.severity === 'danger' ? 'warning' : alert.severity === 'warning' ? 'neutral' : 'calm'}`}>
+                  <div className="insight-top">
+                    <span className={`insight-badge ${alert.severity === 'danger' ? 'warning' : alert.severity === 'warning' ? 'neutral' : 'calm'}`}>TC {alert.card_last4}</span>
+                    <strong>{alert.title}</strong>
+                  </div>
+                  <p>{alert.detail}</p>
+                </article>
+              ))}
+            </div>
+          </Panel>
+        </section>
+      ) : null}
     </>
   )
 }
@@ -1381,12 +1537,14 @@ function TransactionsTab({
   const activeTags = data.tags.filter((tag) => tag.active)
   const linkedIncomeOptions = data.fixed_income_sources.filter((item) => item.active)
   const linkedObligationOptions = data.obligations
+  const linkedCreditCardStatements = data.credit_card_statements.filter((item) => item.remaining_amount > 0 || item.id === transactionForm.credit_card_statement_id)
   const selectedFixedIncome = linkedIncomeOptions.find((item) => item.id === transactionForm.fixed_income_source_id) ?? null
   const selectedObligation = linkedObligationOptions.find((item) => item.id === transactionForm.obligation_id) ?? null
+  const selectedCreditCardStatement = linkedCreditCardStatements.find((item) => item.id === transactionForm.credit_card_statement_id) ?? null
   const selectedLinkedBalance = transactionForm.kind === 'ingreso'
     ? selectedFixedIncome?.current_period_balance ?? 0
     : transactionForm.kind === 'gasto'
-      ? selectedObligation?.current_period_balance ?? 0
+      ? selectedCreditCardStatement?.remaining_amount ?? selectedObligation?.current_period_balance ?? 0
       : 0
   const filteredTransactions = historyTagFilter
     ? data.transactions.filter((transaction) => transaction.tags.some((label) => sameTagLabel(label, historyTagFilter)))
@@ -1473,7 +1631,7 @@ function TransactionsTab({
               {(Object.keys(transactionKindLabels) as TransactionKind[]).map((kind) => (
                 <button key={kind} type="button" className={transactionForm.kind === kind ? 'kind-chip active' : 'kind-chip'} onClick={() => {
                   setTransactionSettlementMode('partial')
-                  setTransactionForm((current) => ({ ...current, kind, category: '', amount: 0, fixed_income_source_id: null, obligation_id: null }))
+                  setTransactionForm((current) => ({ ...current, kind, category: '', amount: 0, fixed_income_source_id: null, obligation_id: null, credit_card_statement_id: null }))
                 }}>
                   <strong>{transactionKindLabels[kind]}</strong>
                 </button>
@@ -1491,6 +1649,7 @@ function TransactionsTab({
                     ...current,
                     fixed_income_source_id: nextId,
                     obligation_id: null,
+                    credit_card_statement_id: null,
                     wallet: linkedItem?.wallet ?? current.wallet,
                     category: linkedItem?.label ?? current.category,
                     amount: transactionSettlementMode === 'complete' && linkedItem ? linkedItem.current_period_balance : current.amount,
@@ -1518,35 +1677,73 @@ function TransactionsTab({
           {transactionForm.kind === 'gasto' ? (
             <>
               <label>
-                Gasto fijo vinculado
-                <select value={transactionForm.obligation_id ?? ''} onChange={(event) => {
+                Pago de tarjeta vinculado
+                <select value={transactionForm.credit_card_statement_id ?? ''} onChange={(event) => {
                   const nextId = event.target.value ? Number(event.target.value) : null
-                  const linkedItem = linkedObligationOptions.find((item) => item.id === nextId) ?? null
+                  const linkedStatement = linkedCreditCardStatements.find((item) => item.id === nextId) ?? null
                   setTransactionForm((current) => ({
                     ...current,
-                    obligation_id: nextId,
+                    credit_card_statement_id: nextId,
+                    obligation_id: null,
                     fixed_income_source_id: null,
-                    category: linkedItem ? categoryLabelById(data.categories, linkedItem.category_id) || current.category : current.category,
-                    amount: transactionSettlementMode === 'complete' && linkedItem ? linkedItem.current_period_balance : current.amount,
+                    category: linkedStatement ? `Pago TC ${linkedStatement.card_last4}` : current.category,
+                    amount: transactionSettlementMode === 'complete' && linkedStatement ? linkedStatement.remaining_amount : current.amount,
                   }))
                 }}>
                   <option value="">Sin vincular</option>
-                  {linkedObligationOptions.map((item) => <option key={item.id} value={item.id}>{`${item.label} · pendiente ${currency(item.current_period_balance)}`}</option>)}
+                  {linkedCreditCardStatements.map((item) => <option key={item.id} value={item.id}>{`${item.card_label} ${item.card_last4} · pendiente ${currency(item.remaining_amount)}`}</option>)}
                 </select>
               </label>
-              <div className="span-2 form-kind-block">
-                <small>Aplicacion del gasto</small>
-                <div className="settlement-mode-row">
-                  <button type="button" className={transactionSettlementMode === 'partial' ? 'tag active' : 'tag'} onClick={() => setTransactionSettlementMode('partial')}>Parcial</button>
-                  <button type="button" className={transactionSettlementMode === 'complete' ? 'tag active' : 'tag'} onClick={() => {
-                    setTransactionSettlementMode('complete')
-                    if (selectedObligation) {
-                      setTransactionForm((current) => ({ ...current, amount: selectedObligation.current_period_balance }))
-                    }
-                  }}>Completo</button>
-                </div>
-              </div>
-              {selectedObligation ? <div className="span-2 banner subtle">Estado del periodo: {selectedObligation.current_period_status}. Registrado: {currency(selectedObligation.current_period_recorded_amount)} · Pendiente: {currency(selectedObligation.current_period_balance)} de {currency(selectedObligation.current_period_expected_amount)}.</div> : null}
+              {selectedCreditCardStatement ? (
+                <>
+                  <div className="span-2 form-kind-block">
+                    <small>Aplicacion del pago de tarjeta</small>
+                    <div className="settlement-mode-row">
+                      <button type="button" className={transactionSettlementMode === 'partial' ? 'tag active' : 'tag'} onClick={() => setTransactionSettlementMode('partial')}>Parcial</button>
+                      <button type="button" className={transactionSettlementMode === 'complete' ? 'tag active' : 'tag'} onClick={() => {
+                        setTransactionSettlementMode('complete')
+                        setTransactionForm((current) => ({ ...current, amount: selectedCreditCardStatement.remaining_amount }))
+                      }}>Completo</button>
+                    </div>
+                  </div>
+                  <div className="span-2 banner subtle">Estado {selectedCreditCardStatement.card_last4}: {currency(selectedCreditCardStatement.statement_amount)} · fijo conciliado {currency(selectedCreditCardStatement.fixed_items_total)} · pendiente {currency(selectedCreditCardStatement.remaining_amount)}.</div>
+                </>
+              ) : null}
+              {!selectedCreditCardStatement ? (
+                <>
+                  <label>
+                    Gasto fijo vinculado
+                    <select value={transactionForm.obligation_id ?? ''} onChange={(event) => {
+                      const nextId = event.target.value ? Number(event.target.value) : null
+                      const linkedItem = linkedObligationOptions.find((item) => item.id === nextId) ?? null
+                      setTransactionForm((current) => ({
+                        ...current,
+                        obligation_id: nextId,
+                        fixed_income_source_id: null,
+                        credit_card_statement_id: null,
+                        category: linkedItem ? categoryLabelById(data.categories, linkedItem.category_id) || current.category : current.category,
+                        amount: transactionSettlementMode === 'complete' && linkedItem ? linkedItem.current_period_balance : current.amount,
+                      }))
+                    }}>
+                      <option value="">Sin vincular</option>
+                      {linkedObligationOptions.map((item) => <option key={item.id} value={item.id}>{`${item.label} · pendiente ${currency(item.current_period_balance)}`}</option>)}
+                    </select>
+                  </label>
+                  <div className="span-2 form-kind-block">
+                    <small>Aplicacion del gasto</small>
+                    <div className="settlement-mode-row">
+                      <button type="button" className={transactionSettlementMode === 'partial' ? 'tag active' : 'tag'} onClick={() => setTransactionSettlementMode('partial')}>Parcial</button>
+                      <button type="button" className={transactionSettlementMode === 'complete' ? 'tag active' : 'tag'} onClick={() => {
+                        setTransactionSettlementMode('complete')
+                        if (selectedObligation) {
+                          setTransactionForm((current) => ({ ...current, amount: selectedObligation.current_period_balance }))
+                        }
+                      }}>Completo</button>
+                    </div>
+                  </div>
+                  {selectedObligation ? <div className="span-2 banner subtle">Estado del periodo: {selectedObligation.current_period_status}. Registrado: {currency(selectedObligation.current_period_recorded_amount)} · Pendiente: {currency(selectedObligation.current_period_balance)} de {currency(selectedObligation.current_period_expected_amount)}.</div> : null}
+                </>
+              ) : null}
             </>
           ) : null}
           <label>
@@ -1653,15 +1850,27 @@ function BaseTab({
   setFixedIncomeForm,
   obligationForm,
   setObligationForm,
+  creditCardForm,
+  setCreditCardForm,
+  creditCardStatementForm,
+  setCreditCardStatementForm,
   editingFixedIncomeId,
   editingObligationId,
+  editingCreditCardId,
+  editingCreditCardStatementId,
   expenseCategories,
   onFixedIncomeSubmit,
   onObligationSubmit,
+  onCreditCardSubmit,
+  onCreditCardStatementSubmit,
   onEditFixedIncome,
   onEditObligation,
+  onEditCreditCard,
+  onEditCreditCardStatement,
   onDeleteFixedIncome,
   onDeleteObligation,
+  onDeleteCreditCard,
+  onDeleteCreditCardStatement,
 }: {
   data: BootstrapResponse
   canEditData: boolean
@@ -1670,17 +1879,31 @@ function BaseTab({
   setFixedIncomeForm: Dispatch<SetStateAction<FixedIncomeSourceInput>>
   obligationForm: ObligationInput
   setObligationForm: Dispatch<SetStateAction<ObligationInput>>
+  creditCardForm: CreditCardInput
+  setCreditCardForm: Dispatch<SetStateAction<CreditCardInput>>
+  creditCardStatementForm: CreditCardStatementInput
+  setCreditCardStatementForm: Dispatch<SetStateAction<CreditCardStatementInput>>
   editingFixedIncomeId: number | null
   editingObligationId: number | null
+  editingCreditCardId: number | null
+  editingCreditCardStatementId: number | null
   expenseCategories: CategoryConfig[]
   onFixedIncomeSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onObligationSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onCreditCardSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onCreditCardStatementSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onEditFixedIncome: (item: FixedIncomeSource) => void
   onEditObligation: (item: Obligation) => void
+  onEditCreditCard: (item: CreditCard) => void
+  onEditCreditCardStatement: (item: CreditCardStatement) => void
   onDeleteFixedIncome: (id: number) => Promise<void>
   onDeleteObligation: (id: number) => Promise<void>
+  onDeleteCreditCard: (id: number) => Promise<void>
+  onDeleteCreditCardStatement: (id: number) => Promise<void>
 }) {
   const incomeWallets = new Map(data.wallets.map((wallet) => [wallet, walletVisual(wallet)]))
+  const selectedStatementCard = data.credit_cards.find((item) => item.id === creditCardStatementForm.credit_card_id) ?? null
+  const cardBoundObligations = selectedStatementCard ? data.obligations.filter((item) => item.credit_card_id === selectedStatementCard.id) : []
 
   return (
     <section className="content-grid">
@@ -1772,6 +1995,13 @@ function BaseTab({
             </select>
           </label>
           <label>
+            Tarjeta asociada
+            <select value={obligationForm.credit_card_id ?? ''} onChange={(event) => setObligationForm((current) => ({ ...current, credit_card_id: event.target.value ? Number(event.target.value) : null }))}>
+              <option value="">No aplica</option>
+              {data.credit_cards.filter((item) => item.active).map((card) => <option key={card.id} value={card.id}>{`${card.label} · ${card.last4}`}</option>)}
+            </select>
+          </label>
+          <label>
             Frecuencia
             <select value={obligationForm.cadence} onChange={(event) => setObligationForm((current) => normalizeObligationCadenceFields({ ...current, cadence: event.target.value as ObligationInput['cadence'] }))}>
               <option value="monthly">Mensual</option>
@@ -1821,13 +2051,151 @@ function BaseTab({
                 })()}
                 <div>
                   <strong>{item.label}</strong>
-                  <p>{item.status} · {cadenceScheduleCopy(item.cadence, item.due_day, item.due_weekday)}</p>
+                  <p>{item.status} · {cadenceScheduleCopy(item.cadence, item.due_day, item.due_weekday)}{item.credit_card_id ? ` · TC ${data.credit_cards.find((card) => card.id === item.credit_card_id)?.last4 ?? ''}` : ''}</p>
                 </div>
               </div>
               <div className="list-actions">
                 <span className="amount neutral">{currency(item.amount)}</span>
                 <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEditObligation(item)}>Editar</button>
                 <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDeleteObligation(item.id)}>Borrar</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="Tarjetas de credito" subtitle="Corte, limite y fecha de pago.">
+        <form className="form-grid dynamic-form compact" onSubmit={onCreditCardSubmit}>
+          <label>
+            Banco o etiqueta
+            <input value={creditCardForm.label} onChange={(event) => setCreditCardForm((current) => ({ ...current, label: event.target.value }))} />
+          </label>
+          <label>
+            Ultimos 4
+            <input maxLength={4} value={creditCardForm.last4} onChange={(event) => setCreditCardForm((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(-4) }))} />
+          </label>
+          <label>
+            Dia de corte
+            <input type="number" min="1" max="31" value={creditCardForm.closing_day} onChange={(event) => setCreditCardForm((current) => ({ ...current, closing_day: clampDayOfMonth(Number(event.target.value)) }))} />
+          </label>
+          <label>
+            Dia limite de pago
+            <input type="number" min="1" max="31" value={creditCardForm.due_day} onChange={(event) => setCreditCardForm((current) => ({ ...current, due_day: clampDayOfMonth(Number(event.target.value)) }))} />
+          </label>
+          <label>
+            Limite de la tarjeta
+            <input type="number" min="0" step="0.01" value={creditCardForm.limit_amount || ''} onChange={(event) => setCreditCardForm((current) => ({ ...current, limit_amount: Number(event.target.value) }))} />
+          </label>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={creditCardForm.active} onChange={(event) => setCreditCardForm((current) => ({ ...current, active: event.target.checked }))} /> Activa
+          </label>
+          <div className="span-2 action-row">
+            <button type="submit" disabled={saving || !canEditData}>{editingCreditCardId ? 'Actualizar tarjeta' : 'Agregar tarjeta'}</button>
+          </div>
+        </form>
+        <div className="list-stack">
+          {data.credit_cards.map((card) => (
+            <article key={card.id} className="list-card">
+              <div className="list-leading list-leading-top">
+                <VisualBadge iconToken="credit_card" colorToken="petrol" />
+                <div>
+                  <strong>{card.label} · {card.last4}</strong>
+                  <p>Corte {card.closing_day} · Pago {card.due_day} · Limite {currency(card.limit_amount)}</p>
+                </div>
+              </div>
+              <div className="list-actions">
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEditCreditCard(card)}>Editar</button>
+                <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDeleteCreditCard(card.id)}>Borrar</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="Estados de cuenta" subtitle="Concilia lo fijo del ciclo antes de pagar la tarjeta.">
+        <form className="form-grid dynamic-form compact" onSubmit={onCreditCardStatementSubmit}>
+          <label>
+            Tarjeta
+            <select value={creditCardStatementForm.credit_card_id ?? ''} onChange={(event) => {
+              const nextId = event.target.value ? Number(event.target.value) : null
+              const nextCard = data.credit_cards.find((item) => item.id === nextId) ?? null
+              setCreditCardStatementForm((current) => ({
+                ...current,
+                credit_card_id: nextId,
+                due_date: nextCard ? cardCycleDueDate(current.statement_date, nextCard.due_day) : current.due_date,
+                items: nextCard ? data.obligations.filter((item) => item.credit_card_id === nextCard.id).map((item) => ({ obligation_id: item.id, amount: item.amount })) : [],
+              }))
+            }}>
+              <option value="">Selecciona una tarjeta</option>
+              {data.credit_cards.filter((item) => item.active).map((card) => <option key={card.id} value={card.id}>{`${card.label} · ${card.last4}`}</option>)}
+            </select>
+          </label>
+          <label>
+            Fecha del estado
+            <input type="date" value={creditCardStatementForm.statement_date} onChange={(event) => setCreditCardStatementForm((current) => ({ ...current, statement_date: event.target.value, due_date: selectedStatementCard ? cardCycleDueDate(event.target.value, selectedStatementCard.due_day) : current.due_date }))} />
+          </label>
+          <label>
+            Fecha limite de pago
+            <input type="date" value={creditCardStatementForm.due_date} onChange={(event) => setCreditCardStatementForm((current) => ({ ...current, due_date: event.target.value }))} />
+          </label>
+          <label>
+            Ano que cubre
+            <input type="number" min="2000" max="2100" value={creditCardStatementForm.period_year} onChange={(event) => setCreditCardStatementForm((current) => ({ ...current, period_year: Number(event.target.value) }))} />
+          </label>
+          <label>
+            Mes que cubre
+            <select value={creditCardStatementForm.period_month} onChange={(event) => setCreditCardStatementForm((current) => ({ ...current, period_month: Number(event.target.value) }))}>
+              {Array.from({ length: 12 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}
+            </select>
+          </label>
+          <label>
+            Monto del estado
+            <input type="number" min="0" step="0.01" value={creditCardStatementForm.statement_amount || ''} onChange={(event) => setCreditCardStatementForm((current) => ({ ...current, statement_amount: Number(event.target.value) }))} />
+          </label>
+          <label className="span-2">
+            Notas
+            <textarea rows={2} value={creditCardStatementForm.notes} onChange={(event) => setCreditCardStatementForm((current) => ({ ...current, notes: event.target.value }))} />
+          </label>
+          <div className="span-2 statement-items-grid">
+            {cardBoundObligations.map((item) => {
+              const currentItem = creditCardStatementForm.items.find((statementItem) => statementItem.obligation_id === item.id)
+              const selected = Boolean(currentItem)
+              return (
+                <label key={item.id} className="statement-item-card">
+                  <span className="checkbox-row">
+                    <input type="checkbox" checked={selected} onChange={(event) => setCreditCardStatementForm((current) => ({
+                      ...current,
+                      items: event.target.checked
+                        ? [...current.items.filter((statementItem) => statementItem.obligation_id !== item.id), { obligation_id: item.id, amount: item.amount }]
+                        : current.items.filter((statementItem) => statementItem.obligation_id !== item.id),
+                    }))} />
+                    {item.label}
+                  </span>
+                  {selected ? <input type="number" min="0" step="0.01" value={currentItem?.amount ?? item.amount} onChange={(event) => setCreditCardStatementForm((current) => ({
+                    ...current,
+                    items: current.items.map((statementItem) => statementItem.obligation_id === item.id ? { ...statementItem, amount: Number(event.target.value) } : statementItem),
+                  }))} /> : null}
+                </label>
+              )
+            })}
+            {selectedStatementCard && cardBoundObligations.length === 0 ? <div className="banner">No hay gastos fijos asociados a esta tarjeta todavia.</div> : null}
+          </div>
+          <div className="span-2 action-row">
+            <button type="submit" disabled={saving || !canEditData}>{editingCreditCardStatementId ? 'Actualizar estado' : 'Registrar estado'}</button>
+          </div>
+        </form>
+        <div className="list-stack">
+          {data.credit_card_statements.map((statement) => (
+            <article key={statement.id} className="list-card">
+              <div className="list-leading list-leading-top">
+                <VisualBadge iconToken="credit_card" colorToken="petrol" />
+                <div>
+                  <strong>{statement.card_label} · {statement.card_last4}</strong>
+                  <p>Estado {currency(statement.statement_amount)} · vence {statement.due_date.slice(0, 10)} · cubre {statement.period_month}/{statement.period_year}</p>
+                  <small>Fijo conciliado {currency(statement.fixed_items_total)} · pagado {currency(statement.paid_amount)} · restante {currency(statement.remaining_amount)}</small>
+                </div>
+              </div>
+              <div className="list-actions">
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEditCreditCardStatement(statement)}>Editar</button>
+                <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDeleteCreditCardStatement(statement.id)}>Borrar</button>
               </div>
             </article>
           ))}

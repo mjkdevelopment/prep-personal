@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
@@ -59,6 +59,7 @@ class ObligationBase(BaseModel):
     label: str = Field(min_length=1)
     amount: float = Field(gt=0)
     category_id: Optional[str] = None
+    credit_card_id: Optional[int] = None
     cadence: FixedIncomeCadence
     due_day: int = Field(ge=1, le=31)
     due_weekday: Optional[int] = Field(default=None, ge=1, le=7)
@@ -85,6 +86,7 @@ class TransactionBase(BaseModel):
     category: str = Field(min_length=1)
     fixed_income_source_id: Optional[int] = None
     obligation_id: Optional[int] = None
+    credit_card_statement_id: Optional[int] = None
     tags: list[str] = Field(default_factory=list)
     notes: str = ''
     date: datetime
@@ -151,6 +153,72 @@ class TagConfigInput(BaseModel):
     preset_recurring: Optional[bool] = None
 
 
+class CreditCardBase(BaseModel):
+    label: str = Field(min_length=1)
+    last4: str = Field(min_length=4, max_length=4)
+    closing_day: int = Field(ge=1, le=31)
+    due_day: int = Field(ge=1, le=31)
+    limit_amount: float = Field(gt=0)
+    active: bool = True
+
+
+class CreditCardCreate(CreditCardBase):
+    pass
+
+
+class CreditCard(CreditCardBase):
+    id: int
+
+
+class CreditCardStatementItemInput(BaseModel):
+    obligation_id: int
+    amount: float = Field(gt=0)
+
+
+class CreditCardStatementItem(CreditCardStatementItemInput):
+    obligation_label: str
+
+
+class CreditCardStatementBase(BaseModel):
+    credit_card_id: int
+    statement_date: date
+    due_date: date
+    period_year: int = Field(ge=2000, le=2100)
+    period_month: int = Field(ge=1, le=12)
+    statement_amount: float = Field(gt=0)
+    notes: str = ''
+
+
+class CreditCardStatementCreate(CreditCardStatementBase):
+    items: list[CreditCardStatementItemInput] = Field(default_factory=list)
+
+
+class CreditCardStatement(CreditCardStatementBase):
+    id: int
+    card_label: str
+    card_last4: str
+    paid_amount: float = 0
+    remaining_amount: float = 0
+    fixed_items_total: float = 0
+    fixed_items_paid_amount: float = 0
+    personal_paid_amount: float = 0
+    payment_status: str = 'Pendiente'
+    utilization_ratio: float = 0
+    items: list[CreditCardStatementItem] = Field(default_factory=list)
+
+
+class CreditCardAlert(BaseModel):
+    statement_id: int
+    credit_card_id: int
+    card_label: str
+    card_last4: str
+    title: str
+    detail: str
+    severity: str
+    days_until_due: int
+    remaining_amount: float
+
+
 class AllocationSuggestion(BaseModel):
     for_obligations: float
     for_goals: float
@@ -214,6 +282,7 @@ class DashboardSummary(BaseModel):
     wallet_balances: list[WalletBalanceView]
     bucket_overviews: list[BucketOverview]
     expense_comparisons: list[CategorySpendComparison]
+    credit_card_alerts: list[CreditCardAlert]
     generated_insights: list[InsightView]
 
 
@@ -228,6 +297,8 @@ class BootstrapResponse(BaseModel):
     audit_events: list['AuditEvent']
     fixed_income_sources: list[FixedIncomeSource]
     obligations: list[Obligation]
+    credit_cards: list[CreditCard]
+    credit_card_statements: list[CreditCardStatement]
     transactions: list[Transaction]
     categories: list[CategoryConfig]
     tags: list[TagConfig]

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .defaults import DEFAULT_WALLETS
-from .schemas import AllocationSuggestion, BootstrapResponse, BucketOverview, CategoryConfig, CategorySpendComparison, DashboardSummary, FixedIncomeSource, InsightView, Obligation, QuincenaReserveView, TagConfig, Transaction, UserRole, WalletBalanceView
+from .schemas import AllocationSuggestion, BootstrapResponse, BucketOverview, CategoryConfig, CategorySpendComparison, CreditCard, CreditCardAlert, CreditCardStatement, DashboardSummary, FixedIncomeSource, InsightView, Obligation, QuincenaReserveView, TagConfig, Transaction, UserRole, WalletBalanceView
 
 
 @dataclass
@@ -38,6 +38,42 @@ def _monthly_expected_amount(amount: float, cadence: str) -> float:
     return amount * _payments_per_month(cadence)
 
 
+def _statement_personal_totals_by_transaction(statements: list[CreditCardStatement], transactions: list[Transaction]) -> dict[int, float]:
+    statements_by_id = {item.id: item for item in statements}
+    payments_by_statement: dict[int, list[Transaction]] = {}
+    for transaction in sorted(transactions, key=lambda item: (item.date, item.id)):
+        if transaction.credit_card_statement_id is None:
+            continue
+        payments_by_statement.setdefault(transaction.credit_card_statement_id, []).append(transaction)
+
+    personal_by_transaction: dict[int, float] = {}
+    for statement_id, payments in payments_by_statement.items():
+        statement = statements_by_id.get(statement_id)
+        if statement is None:
+            continue
+        remaining_fixed_total = statement.fixed_items_total
+        for payment in payments:
+            fixed_portion = min(payment.amount, max(remaining_fixed_total, 0))
+            remaining_fixed_total = max(remaining_fixed_total - fixed_portion, 0)
+            personal_by_transaction[payment.id] = max(payment.amount - fixed_portion, 0)
+    return personal_by_transaction
+
+
+def _credit_card_alerts(statements: list[CreditCardStatement]) -> list[CreditCardAlert]:
+    today = datetime.now().date()
+    alerts: list[CreditCardAlert] = []
+    for statement in statements:
+        if statement.remaining_amount <= 0:
+            continue
+        days_until_due = (statement.due_date - today).days
+        if days_until_due > 5:
+            continue
+        severity = 'danger' if days_until_due < 0 else 'warning' if days_until_due <= 2 else 'calm'
+        detail = f'Quedan {statement.remaining_amount:.0f} por pagar antes del {statement.due_date.isoformat()}.' if days_until_due >= 0 else f'La fecha limite fue {statement.due_date.isoformat()} y aun quedan {statement.remaining_amount:.0f} pendientes.'
+        alerts.append(CreditCardAlert(statement_id=statement.id, credit_card_id=statement.credit_card_id, card_label=statement.card_label, card_last4=statement.card_last4, title=f'TC {statement.card_last4} en seguimiento', detail=detail, severity=severity, days_until_due=days_until_due, remaining_amount=_round(statement.remaining_amount)))
+    return alerts
+
+
 def suggest_income_allocation(amount: float, snapshot: FinancialSnapshot) -> AllocationSuggestion:
     if amount <= 0:
         return AllocationSuggestion(for_obligations=0, for_goals=0, for_personal=0, rationale='Introduce un monto valido para generar una recomendacion.')
@@ -57,8 +93,10 @@ def suggest_income_allocation(amount: float, snapshot: FinancialSnapshot) -> All
     return AllocationSuggestion(for_obligations=_round(obligations_allocation), for_goals=adjusted_goals, for_personal=_round(personal_allocation), rationale=rationale)
 
 
-def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], transactions: list[Transaction], categories: list[CategoryConfig]) -> DashboardSummary:
+def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], transactions: list[Transaction], categories: list[CategoryConfig]) -> DashboardSummary:
     now = datetime.now()
+    del credit_cards
+    transactions_by_id = {item.id: item for item in transactions}
     fixed_income_expected = sum(_monthly_expected_amount(item.amount, item.cadence) for item in fixed_income_sources if item.active)
     income_reported_this_month = sum(item.amount for item in transactions if _is_income(item.kind) and item.date.year == now.year and item.date.month == now.month)
     pending_obligations_total = sum(item.current_period_balance for item in obligations)
@@ -67,7 +105,9 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     goals_target = fixed_income_expected * 0.20
     goals_reserved = sum(item.amount for item in transactions if item.kind in {'ahorro', 'inversion', 'deuda'})
     personal_target = fixed_income_expected * 0.30
-    personal_spent_this_month = sum(item.amount for item in transactions if item.kind == 'gasto' and item.obligation_id is None and item.date.year == now.year and item.date.month == now.month)
+    personal_from_card_payments = _statement_personal_totals_by_transaction(credit_card_statements, transactions)
+    direct_personal_spent = sum(item.amount for item in transactions if item.kind == 'gasto' and item.obligation_id is None and item.credit_card_statement_id is None and item.date.year == now.year and item.date.month == now.month)
+    personal_spent_this_month = direct_personal_spent + sum(amount for transaction_id, amount in personal_from_card_payments.items() if (transactions_by_id.get(transaction_id) and transactions_by_id[transaction_id].date.year == now.year and transactions_by_id[transaction_id].date.month == now.month))
     total_expenses_this_month = sum(item.amount for item in transactions if _affects_cash_negatively(item.kind) and item.date.year == now.year and item.date.month == now.month)
     snapshot = FinancialSnapshot(fixed_income_expected=fixed_income_expected, income_reported=income_reported_this_month, pending_obligations=pending_obligations_total)
     latest_income_amount = next((item.amount for item in transactions if _is_income(item.kind)), 0)
@@ -112,6 +152,7 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     labels = sorted(set(current_category_totals) | set(previous_category_totals), key=lambda label: current_category_totals.get(label, 0) + previous_category_totals.get(label, 0), reverse=True)
 
     insights = []
+    credit_card_alerts = _credit_card_alerts(credit_card_statements)
     delivery_expenses = sum(item.amount for item in transactions if item.category == 'Delivery')
     if delivery_expenses > 2500:
         insights.append(InsightView(title='Delivery por encima de tendencia', body='Tus gastos en delivery ya superan el umbral mensual esperado. Conviene recortar antes de abrir mas presupuesto personal.'))
@@ -120,6 +161,8 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     else:
         insights.append(InsightView(title='Ingreso base aun incompleto', body=f'Todavia faltan {_round(income_gap):.0f} para llegar al ingreso fijo esperado. El motor debe ser conservador con gasto personal.'))
     insights.append(InsightView(title='Disponible personal real', body=f'Con los ingresos ya registrados, te quedan {_round(remaining_personal_recommended_this_month):.0f} dentro de la recomendacion personal del mes.'))
+    if credit_card_alerts:
+        insights.append(InsightView(title='Tarjetas con fecha cercana', body=f'Tienes {len(credit_card_alerts)} estado(s) de cuenta que requieren seguimiento esta semana.'))
 
     return DashboardSummary(
         safe_personal_available=_round(remaining_personal_recommended_this_month),
@@ -155,9 +198,10 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
             BucketOverview(label='Ahorro, inversion y deuda', reserved=_round(goals_reserved), total=_round(goals_target)),
         ],
         expense_comparisons=[CategorySpendComparison(label=label, color_token=category_by_label.get(label).color_token if label in category_by_label else 'gold', icon_token=category_by_label.get(label).icon_token if label in category_by_label else 'receipt', current_amount=_round(current_category_totals.get(label, 0)), previous_amount=_round(previous_category_totals.get(label, 0))) for label in labels[:5]],
+        credit_card_alerts=credit_card_alerts,
         generated_insights=insights,
     )
 
 
-def build_bootstrap(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], transactions: list[Transaction], categories: list[CategoryConfig], tags: list[TagConfig]) -> BootstrapResponse:
-    return BootstrapResponse(setup_complete=False, theme_id='emerald_editorial', current_username='', current_user_role=UserRole.operator, can_manage_users=False, can_edit_data=True, users=[], audit_events=[], fixed_income_sources=fixed_income_sources, obligations=obligations, transactions=transactions, categories=categories, tags=tags, wallets=DEFAULT_WALLETS, dashboard=build_dashboard(fixed_income_sources, obligations, transactions, categories))
+def build_bootstrap(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], transactions: list[Transaction], categories: list[CategoryConfig], tags: list[TagConfig]) -> BootstrapResponse:
+    return BootstrapResponse(setup_complete=False, theme_id='emerald_editorial', current_username='', current_user_role=UserRole.operator, can_manage_users=False, can_edit_data=True, users=[], audit_events=[], fixed_income_sources=fixed_income_sources, obligations=obligations, credit_cards=credit_cards, credit_card_statements=credit_card_statements, transactions=transactions, categories=categories, tags=tags, wallets=DEFAULT_WALLETS, dashboard=build_dashboard(fixed_income_sources, obligations, credit_cards, credit_card_statements, transactions, categories))
