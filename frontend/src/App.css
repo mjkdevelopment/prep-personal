@@ -415,6 +415,24 @@
   margin-bottom: 0;
 }
 
+.color-picker-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.color-picker-group {
+  display: grid;
+  gap: 10px;
+}
+
+.color-group-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-strong);
+}
+
 .picker-grid {
   grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   margin-bottom: 0;

@@ -16,6 +16,11 @@ export interface ThemePalette {
   amber: string
   coral: string
   sage: string
+  ruby: string
+  indigo: string
+  mint: string
+  bronze: string
+  fuchsia: string
   slate: string
   ink: string
   panelBg: string
@@ -48,6 +53,11 @@ export const palettes: ThemePalette[] = [
     amber: '#D0A55E',
     coral: '#D78363',
     sage: '#8BA37B',
+    ruby: '#B93A5A',
+    indigo: '#4D5DB8',
+    mint: '#44B89A',
+    bronze: '#9B6A2E',
+    fuchsia: '#B24AA3',
     slate: '#57615D',
     ink: '#1A1E1C',
     panelBg: 'linear-gradient(180deg, rgba(255,255,255,0.9), rgba(248,244,236,0.94))',
@@ -69,13 +79,18 @@ export const palettes: ThemePalette[] = [
     sand: '#CCE7F4',
     petrol: '#08273B',
     emerald: '#1B7FA9',
-    gold: '#5ED0FF',
-    terracotta: '#FF8B6A',
-    sky: '#49B8E8',
-    plum: '#4B73A6',
-    amber: '#9CE9FF',
-    coral: '#FF7E6A',
-    sage: '#5FB3B8',
+    gold: '#FFC83D',
+    terracotta: '#FF6F59',
+    sky: '#29A8FF',
+    plum: '#6F63FF',
+    amber: '#00D68F',
+    coral: '#FF5C93',
+    sage: '#36B37E',
+    ruby: '#E5484D',
+    indigo: '#465CFF',
+    mint: '#19C7B5',
+    bronze: '#C98A2E',
+    fuchsia: '#D946EF',
     slate: '#4E6E84',
     ink: '#081C28',
     panelBg: 'linear-gradient(180deg, rgba(255,255,255,0.78), rgba(221,244,255,0.9))',
@@ -104,6 +119,11 @@ export const palettes: ThemePalette[] = [
     amber: '#FFBF66',
     coral: '#E77952',
     sage: '#A0886C',
+    ruby: '#B83F46',
+    indigo: '#6D6FC9',
+    mint: '#4FAE8B',
+    bronze: '#8A5B22',
+    fuchsia: '#C05C97',
     slate: '#7C5A4C',
     ink: '#2B140E',
     panelBg: 'linear-gradient(180deg, rgba(255,249,244,0.9), rgba(248,224,210,0.96))',
@@ -132,6 +152,11 @@ export const palettes: ThemePalette[] = [
     amber: '#FFD970',
     coral: '#F59D67',
     sage: '#A4BE65',
+    ruby: '#D75A4A',
+    indigo: '#6370B8',
+    mint: '#59C19A',
+    bronze: '#B9852E',
+    fuchsia: '#C468B8',
     slate: '#697756',
     ink: '#232A1C',
     panelBg: 'linear-gradient(180deg, rgba(255,255,250,0.94), rgba(235,242,206,0.95))',
@@ -153,13 +178,18 @@ export const palettes: ThemePalette[] = [
     sand: '#E4D7EE',
     petrol: '#311B45',
     emerald: '#6A3FA0',
-    gold: '#D168A2',
-    terracotta: '#39A4A1',
-    sky: '#8CA6E8',
+    gold: '#F59EC8',
+    terracotta: '#2EB5A8',
+    sky: '#7AA7FF',
     plum: '#8A58C3',
-    amber: '#E68BB8',
+    amber: '#FFB14A',
     coral: '#58C5BE',
     sage: '#7E8BC0',
+    ruby: '#D04F6F',
+    indigo: '#5665E8',
+    mint: '#46CFA8',
+    bronze: '#B67A34',
+    fuchsia: '#E056C2',
     slate: '#6A5F83',
     ink: '#1F1428',
     panelBg: 'linear-gradient(180deg, rgba(255,252,255,0.82), rgba(236,224,246,0.92))',
@@ -198,6 +228,11 @@ export function applyTheme(themeId: string): void {
   root.style.setProperty('--amber', palette.amber)
   root.style.setProperty('--coral', palette.coral)
   root.style.setProperty('--sage', palette.sage)
+  root.style.setProperty('--ruby', palette.ruby)
+  root.style.setProperty('--indigo', palette.indigo)
+  root.style.setProperty('--mint', palette.mint)
+  root.style.setProperty('--bronze', palette.bronze)
+  root.style.setProperty('--fuchsia', palette.fuchsia)
   root.style.setProperty('--slate', palette.slate)
   root.style.setProperty('--ink', palette.ink)
   root.style.setProperty('--font-display', palette.fontDisplay)

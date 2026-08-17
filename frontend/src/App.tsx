@@ -67,7 +67,7 @@ import type {
   UserRole,
 } from './types'
 import { currency, formatDateInput } from './utils'
-import { colorTokens, iconGlyph, iconLabel, iconTokens, slugify, tokenColor } from './visuals'
+import { iconGlyph, iconLabel, iconTokens, slugify, tokenColor } from './visuals'
 
 type AppTab = 'dashboard' | 'transactions' | 'base' | 'settings'
 type LinkedSettlementMode = 'partial' | 'complete'
@@ -443,6 +443,33 @@ function VisualBadge({ iconToken, colorToken, narrow = false }: { iconToken: str
 
 function TagPill({ label, colorToken }: { label: string; colorToken: string }) {
   return <span className="history-tag" style={{ background: `${tokenColor(colorToken)}18`, color: tokenColor(colorToken), borderColor: `${tokenColor(colorToken)}33` }}>#{label}</span>
+}
+
+const colorGroups: Array<{ label: string; tokens: string[] }> = [
+  { label: 'Frios', tokens: ['petrol', 'sky', 'indigo', 'plum'] },
+  { label: 'Naturales', tokens: ['emerald', 'sage', 'mint'] },
+  { label: 'Calidos', tokens: ['gold', 'amber', 'bronze', 'terracotta', 'coral', 'ruby'] },
+  { label: 'Acentos', tokens: ['fuchsia'] },
+]
+
+function ColorPicker({ value, onChange }: { value: string; onChange: (token: string) => void }) {
+  return (
+    <div className="color-picker-groups">
+      {colorGroups.map((group) => (
+        <div key={group.label} className="color-picker-group">
+          <span className="color-group-label">{group.label}</span>
+          <div className="picker-grid color-picker compact-grid">
+            {group.tokens.map((token) => (
+              <button key={token} type="button" className={value === token ? 'picker-chip active' : 'picker-chip'} onClick={() => onChange(token)}>
+                <span className="color-dot" style={{ background: tokenColor(token) }} />
+                <small>{token}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function compactInsightBody(body: string): string {
@@ -2375,14 +2402,7 @@ function SettingsTab({
           </label>
           <label className="span-2">
             Color
-            <div className="picker-grid color-picker">
-              {colorTokens.map((token) => (
-                <button key={token} type="button" className={categoryForm.color_token === token ? 'picker-chip active' : 'picker-chip'} onClick={() => setCategoryForm((current) => ({ ...current, color_token: token }))}>
-                  <span className="color-dot" style={{ background: tokenColor(token) }} />
-                  <small>{token}</small>
-                </button>
-              ))}
-            </div>
+            <ColorPicker value={categoryForm.color_token} onChange={(token) => setCategoryForm((current) => ({ ...current, color_token: token }))} />
           </label>
           <label className="checkbox-row span-2">
             <input type="checkbox" checked={categoryForm.active} onChange={(event) => setCategoryForm((current) => ({ ...current, active: event.target.checked }))} /> Activa
@@ -2425,14 +2445,7 @@ function SettingsTab({
           </label>
           <label className="span-2">
             Color
-            <div className="picker-grid color-picker">
-              {colorTokens.map((token) => (
-                <button key={token} type="button" className={tagForm.color_token === token ? 'picker-chip active' : 'picker-chip'} onClick={() => setTagForm((current) => ({ ...current, color_token: token }))}>
-                  <span className="color-dot" style={{ background: tokenColor(token) }} />
-                  <small>{token}</small>
-                </button>
-              ))}
-            </div>
+            <ColorPicker value={tagForm.color_token} onChange={(token) => setTagForm((current) => ({ ...current, color_token: token }))} />
           </label>
           <label className="checkbox-row span-2">
             <input type="checkbox" checked={tagForm.active} onChange={(event) => setTagForm((current) => ({ ...current, active: event.target.checked }))} /> Activo

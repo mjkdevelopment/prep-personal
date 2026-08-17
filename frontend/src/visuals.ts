@@ -1,4 +1,4 @@
-export const colorTokens = ['petrol', 'emerald', 'gold', 'terracotta', 'sky', 'plum', 'amber', 'coral', 'sage'] as const
+export const colorTokens = ['petrol', 'emerald', 'gold', 'terracotta', 'sky', 'plum', 'amber', 'coral', 'sage', 'ruby', 'indigo', 'mint', 'bronze', 'fuchsia'] as const
 export const iconTokens = ['home', 'bolt', 'water', 'tv', 'school', 'restaurant', 'commute', 'group', 'favorite', 'savings', 'trending', 'receipt', 'work', 'briefcase', 'redeem', 'account_balance', 'paid', 'apartment', 'credit_card', 'movie', 'health'] as const
 
 const iconGlyphMap: Record<string, string> = {
