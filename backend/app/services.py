@@ -222,7 +222,7 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
             BucketOverview(label='Personal', reserved=_round(personal_spent_this_month), total=_round(fixed_income_expected * 0.30)),
             BucketOverview(label='Ahorro, inversion y deuda', reserved=_round(goals_reserved), total=_round(goals_target)),
         ],
-        expense_comparisons=[CategorySpendComparison(label=label, color_token=category_by_label.get(label).color_token if label in category_by_label else 'gold', icon_token=category_by_label.get(label).icon_token if label in category_by_label else 'receipt', current_amount=_round(current_category_totals.get(label, 0)), previous_amount=_round(previous_category_totals.get(label, 0))) for label in labels[:5]],
+        expense_comparisons=[CategorySpendComparison(label=label, color_token=category_by_label.get(label).color_token if label in category_by_label else 'gold', icon_token=category_by_label.get(label).icon_token if label in category_by_label else 'receipt', current_amount=_round(current_category_totals.get(label, 0)), previous_amount=_round(previous_category_totals.get(label, 0))) for label in labels],
         credit_card_alerts=credit_card_alerts,
         generated_insights=insights,
     )

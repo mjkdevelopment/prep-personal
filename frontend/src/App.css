@@ -1422,13 +1422,18 @@ textarea {
 
 .pie-legend {
   display: grid;
-  gap: 12px;
+  gap: 8px;
+  align-content: start;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 6px;
 }
 
 .legend-row {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding: 6px 0;
 }
 
 .legend-copy {
@@ -1451,7 +1456,15 @@ textarea {
 
 .legend-row strong {
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+  font-size: 1.02rem;
+  line-height: 1.1;
+}
+
+.legend-row p {
+  margin: 0;
+  color: var(--muted-strong);
+  line-height: 1.15;
 }
 
 .compact-card strong {

@@ -355,6 +355,67 @@ def test_linked_transactions_update_current_period_progress() -> None:
     assert banco_wallet['pending_income_amount'] == 400
 
 
+def test_expense_chart_includes_all_categories_instead_of_top_five() -> None:
+    headers = ensure_app_headers('allcategories', '1234')
+    setup = client.post(
+        '/api/setup/complete',
+        json={
+            'fixed_income_sources': [
+                {
+                    'label': 'Nomina base',
+                    'amount': 70000,
+                    'cadence': 'monthly',
+                    'expected_day': 30,
+                    'expected_weekday': None,
+                    'wallet': 'Banco',
+                    'active': True,
+                }
+            ],
+            'obligations': [],
+        },
+        headers=headers,
+    )
+    assert setup.status_code == 200
+
+    expense_rows = [
+        ('Seguro V,', 18000),
+        ('Nomina Mama', 10000),
+        ('Manutencion', 8000),
+        ('Personal', 5000),
+        ('Compra', 4922),
+        ('CENAS', 7568),
+    ]
+
+    for index, (category, amount) in enumerate(expense_rows, start=1):
+        response = client.post(
+            '/api/transactions',
+            json={
+                'kind': 'gasto',
+                'amount': amount,
+                'wallet': 'Banco',
+                'category': category,
+                'fixed_income_source_id': None,
+                'obligation_id': None,
+                'credit_card_statement_id': None,
+                'tags': [],
+                'notes': f'Gasto {category}',
+                'date': f'2026-08-{index:02d}T10:00:00',
+                'recurring': False,
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200
+
+    dashboard = client.get('/api/bootstrap', headers=headers).json()['dashboard']
+    comparison_total = sum(item['current_amount'] for item in dashboard['expense_comparisons'])
+    labels = {item['label'] for item in dashboard['expense_comparisons']}
+
+    assert dashboard['current_month_expense_total'] == 53490
+    assert comparison_total == 53490
+    assert 'CENAS' in labels
+    assert len(dashboard['expense_comparisons']) == 6
+
+
 def test_category_and_tag_upsert_require_auth() -> None:
     headers = ensure_app_headers('cataloguser', '1234')
     category_response = client.post('/api/categories', json={'id': 'mascotas', 'label': 'Mascotas', 'scope': 'expense', 'type': 'Variable', 'color_token': 'plum', 'icon_token': 'favorite', 'active': True}, headers=headers)

@@ -1402,7 +1402,7 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
         <MetricCard label="Cobertura" value={`${Math.round(data.dashboard.quincena_coverage * 100)}%`} />
       </section>
       <section className="bottom-grid">
-        <Panel title="Pastel de gastos" subtitle="Distribucion mensual.">
+        <Panel title="Grafico de gastos" subtitle="Distribucion mensual.">
           <ExpensePieChart comparisons={data.dashboard.expense_comparisons} />
         </Panel>
         <Panel title="Buckets del mes" subtitle="Reservas vs objetivo.">
