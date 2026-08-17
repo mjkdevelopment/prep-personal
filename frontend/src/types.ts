@@ -143,6 +143,9 @@ export interface QuincenaReserveView {
 export interface WalletBalanceView {
   label: string
   amount: number
+  expected_income_amount: number
+  reported_income_amount: number
+  pending_income_amount: number
 }
 
 export interface BucketOverview {

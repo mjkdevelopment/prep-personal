@@ -38,6 +38,31 @@ def _monthly_expected_amount(amount: float, cadence: str) -> float:
     return amount * _payments_per_month(cadence)
 
 
+def _wallet_balance_views(fixed_income_sources: list[FixedIncomeSource], transactions: list[Transaction]) -> list[WalletBalanceView]:
+    now = datetime.now()
+    active_wallets = {
+        item.wallet for item in fixed_income_sources if item.active
+    } | {
+        item.wallet for item in transactions if item.wallet
+    } | set(DEFAULT_WALLETS)
+    wallet_views: list[WalletBalanceView] = []
+    for wallet in sorted(active_wallets, key=lambda item: DEFAULT_WALLETS.index(item) if item in DEFAULT_WALLETS else len(DEFAULT_WALLETS)):
+        expected_income_amount = sum(_monthly_expected_amount(item.amount, item.cadence) for item in fixed_income_sources if item.active and item.wallet == wallet)
+        reported_income_amount = sum(item.amount for item in transactions if item.wallet == wallet and _is_income(item.kind) and item.date.year == now.year and item.date.month == now.month)
+        amount = sum(item.amount if _is_income(item.kind) else (-item.amount if _affects_cash_negatively(item.kind) else 0) for item in transactions if item.wallet == wallet)
+        pending_income_amount = max(expected_income_amount - reported_income_amount, 0)
+        wallet_views.append(
+            WalletBalanceView(
+                label=wallet,
+                amount=_round(amount),
+                expected_income_amount=_round(expected_income_amount),
+                reported_income_amount=_round(reported_income_amount),
+                pending_income_amount=_round(pending_income_amount),
+            )
+        )
+    return wallet_views
+
+
 def _statement_personal_totals_by_transaction(statements: list[CreditCardStatement], transactions: list[Transaction]) -> dict[int, float]:
     statements_by_id = {item.id: item for item in statements}
     payments_by_statement: dict[int, list[Transaction]] = {}
@@ -191,7 +216,7 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
             QuincenaReserveView(label='Primera quincena', amount=_round(sum(first_half(item) for item in obligations)), detail='Compromisos con vencimiento del dia 1 al 15.'),
             QuincenaReserveView(label='Segunda quincena', amount=_round(sum(second_half(item) for item in obligations)), detail='Compromisos con vencimiento del dia 16 al cierre del mes.'),
         ],
-        wallet_balances=[WalletBalanceView(label=wallet, amount=_round(sum(item.amount if _is_income(item.kind) else (-item.amount if _affects_cash_negatively(item.kind) else 0) for item in transactions if item.wallet == wallet))) for wallet in DEFAULT_WALLETS],
+        wallet_balances=_wallet_balance_views(fixed_income_sources, transactions),
         bucket_overviews=[
             BucketOverview(label='Obligaciones fijas', reserved=_round(obligations_reserved), total=_round(obligations_target)),
             BucketOverview(label='Personal', reserved=_round(personal_spent_this_month), total=_round(fixed_income_expected * 0.30)),

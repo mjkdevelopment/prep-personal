@@ -235,6 +235,9 @@ class QuincenaReserveView(BaseModel):
 class WalletBalanceView(BaseModel):
     label: str
     amount: float
+    expected_income_amount: float = 0
+    reported_income_amount: float = 0
+    pending_income_amount: float = 0
 
 
 class BucketOverview(BaseModel):

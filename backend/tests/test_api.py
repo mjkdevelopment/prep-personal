@@ -348,6 +348,11 @@ def test_linked_transactions_update_current_period_progress() -> None:
     assert dashboard['remaining_personal_recommended_this_month'] == 108
     assert personal_bucket['reserved'] == 0
     assert refreshed_payload['dashboard']['quincena_coverage'] == 0.625
+    banco_wallet = next(item for item in dashboard['wallet_balances'] if item['label'] == 'Banco')
+    assert banco_wallet['amount'] == 100
+    assert banco_wallet['expected_income_amount'] == 1000
+    assert banco_wallet['reported_income_amount'] == 600
+    assert banco_wallet['pending_income_amount'] == 400
 
 
 def test_category_and_tag_upsert_require_auth() -> None:

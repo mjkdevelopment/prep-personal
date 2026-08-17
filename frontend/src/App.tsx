@@ -1421,6 +1421,43 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
         </Panel>
       </section>
       <section className="bottom-grid">
+        <Panel title="Carteras" subtitle="Lo registrado ahora y la base esperada por cartera.">
+          <div className="wallet-grid">
+            {data.dashboard.wallet_balances.map((wallet) => {
+              const visual = walletVisual(wallet.label)
+              const progressRatio = wallet.expected_income_amount <= 0 ? 0 : Math.min(wallet.reported_income_amount / wallet.expected_income_amount, 1)
+              return (
+                <article key={wallet.label} className="wallet-card">
+                  <div className="wallet-card-top">
+                    <div className="wallet-card-head">
+                      <VisualBadge iconToken={visual.icon} colorToken={visual.color} />
+                      <div>
+                        <strong>{wallet.label}</strong>
+                        <p>Saldo registrado ahora</p>
+                      </div>
+                    </div>
+                    <strong className="wallet-amount">{currency(wallet.amount)}</strong>
+                  </div>
+                  <div className="progress-bar wallet-progress"><div style={{ width: `${progressRatio * 100}%` }} /></div>
+                  <div className="wallet-meta-grid">
+                    <div>
+                      <span>Ingreso fijo esperado</span>
+                      <strong>{currency(wallet.expected_income_amount)}</strong>
+                    </div>
+                    <div>
+                      <span>Reportado este mes</span>
+                      <strong>{currency(wallet.reported_income_amount)}</strong>
+                    </div>
+                    <div>
+                      <span>Falta por registrar</span>
+                      <strong>{currency(wallet.pending_income_amount)}</strong>
+                    </div>
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+        </Panel>
         <Panel title="Margen libre" subtitle="Excedente del mes.">
           <div className="free-margin-grid">
             <div className="free-margin-card">
