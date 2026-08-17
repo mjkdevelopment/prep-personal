@@ -67,7 +67,7 @@ import type {
   UserRole,
 } from './types'
 import { currency, formatDateInput } from './utils'
-import { iconGlyph, iconLabel, iconTokens, slugify, tokenColor } from './visuals'
+import { colorLabel, iconGlyph, iconLabel, iconTokens, slugify, tokenColor } from './visuals'
 
 type AppTab = 'dashboard' | 'transactions' | 'base' | 'settings'
 type LinkedSettlementMode = 'partial' | 'complete'
@@ -452,17 +452,25 @@ const colorGroups: Array<{ label: string; tokens: string[] }> = [
   { label: 'Acentos', tokens: ['fuchsia'] },
 ]
 
-function ColorPicker({ value, onChange }: { value: string; onChange: (token: string) => void }) {
+const expenseColorTokens = ['petrol', 'sky', 'indigo', 'plum', 'terracotta', 'coral', 'ruby', 'bronze', 'fuchsia']
+const incomeColorTokens = ['emerald', 'sage', 'mint', 'gold', 'amber', 'sky']
+
+function ColorPicker({ value, onChange, allowedTokens }: { value: string; onChange: (token: string) => void; allowedTokens?: string[] }) {
+  const allowed = allowedTokens ? new Set(allowedTokens) : null
+  const visibleGroups = colorGroups
+    .map((group) => ({ ...group, tokens: allowed ? group.tokens.filter((token) => allowed.has(token)) : group.tokens }))
+    .filter((group) => group.tokens.length > 0)
+
   return (
     <div className="color-picker-groups">
-      {colorGroups.map((group) => (
+      {visibleGroups.map((group) => (
         <div key={group.label} className="color-picker-group">
           <span className="color-group-label">{group.label}</span>
           <div className="picker-grid color-picker compact-grid">
             {group.tokens.map((token) => (
               <button key={token} type="button" className={value === token ? 'picker-chip active' : 'picker-chip'} onClick={() => onChange(token)}>
                 <span className="color-dot" style={{ background: tokenColor(token) }} />
-                <small>{token}</small>
+                <small>{colorLabel(token)}</small>
               </button>
             ))}
           </div>
@@ -2402,7 +2410,7 @@ function SettingsTab({
           </label>
           <label className="span-2">
             Color
-            <ColorPicker value={categoryForm.color_token} onChange={(token) => setCategoryForm((current) => ({ ...current, color_token: token }))} />
+            <ColorPicker value={categoryForm.color_token} allowedTokens={categoryForm.scope === 'income' ? incomeColorTokens : expenseColorTokens} onChange={(token) => setCategoryForm((current) => ({ ...current, color_token: token }))} />
           </label>
           <label className="checkbox-row span-2">
             <input type="checkbox" checked={categoryForm.active} onChange={(event) => setCategoryForm((current) => ({ ...current, active: event.target.checked }))} /> Activa
@@ -2419,7 +2427,7 @@ function SettingsTab({
                 <span className="icon-badge" style={{ background: `${tokenColor(category.color_token)}22`, color: tokenColor(category.color_token) }}>{iconGlyph(category.icon_token)}</span>
                 <div>
                   <strong>{category.label}</strong>
-                  <p>{category.scope} · {category.type} · {category.active ? 'activa' : 'oculta'}</p>
+                  <p>{category.scope} · {category.type} · {colorLabel(category.color_token)} · {category.active ? 'activa' : 'oculta'}</p>
                 </div>
               </div>
               <div className="list-actions">
@@ -2462,7 +2470,7 @@ function SettingsTab({
                 <span className="icon-badge narrow" style={{ background: `${tokenColor(tag.color_token)}22`, color: tokenColor(tag.color_token) }}>#</span>
                 <div>
                   <strong>{tag.label}</strong>
-                  <p>{tag.active ? 'activo' : 'oculto'} · {tag.color_token}</p>
+                  <p>{tag.active ? 'activo' : 'oculto'} · {colorLabel(tag.color_token)}</p>
                 </div>
               </div>
               <div className="list-actions">

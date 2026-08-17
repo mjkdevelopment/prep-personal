@@ -49,12 +49,33 @@ const iconLabelMap: Record<string, string> = {
   health: 'Salud',
 }
 
+const colorLabelMap: Record<string, string> = {
+  petrol: 'Petroleo',
+  emerald: 'Esmeralda',
+  gold: 'Dorado',
+  terracotta: 'Terracota',
+  sky: 'Cielo',
+  plum: 'Ciruela',
+  amber: 'Ambar',
+  coral: 'Coral',
+  sage: 'Salvia',
+  ruby: 'RubI',
+  indigo: 'Indigo',
+  mint: 'Menta',
+  bronze: 'Bronce',
+  fuchsia: 'Fucsia',
+}
+
 export function iconGlyph(token: string): string {
   return iconGlyphMap[token] ?? '◼'
 }
 
 export function iconLabel(token: string): string {
   return iconLabelMap[token] ?? token
+}
+
+export function colorLabel(token: string): string {
+  return colorLabelMap[token] ?? token
 }
 
 export function tokenColor(token: string): string {
