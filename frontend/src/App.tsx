@@ -2739,11 +2739,15 @@ function ExpensePieChart({ comparisons }: { comparisons: BootstrapResponse['dash
       <div className="pie-legend">
         {items.map((item) => {
           const percentage = Math.round((item.current_amount / total) * 100)
+          const seriesColor = tokenColor(item.color_token)
           return (
             <article key={item.label} className="legend-row">
-              <span className="icon-badge narrow" style={{ background: `${tokenColor(item.color_token)}22`, color: tokenColor(item.color_token) }}>{iconGlyph(item.icon_token)}</span>
-              <div>
-                <strong>{item.label}</strong>
+              <span className="icon-badge narrow" style={{ background: `${seriesColor}22`, color: seriesColor }}>{iconGlyph(item.icon_token)}</span>
+              <div className="legend-copy">
+                <div className="legend-title-row">
+                  <span className="legend-swatch" aria-hidden="true" style={{ background: seriesColor }} />
+                  <strong style={{ color: seriesColor }}>{item.label}</strong>
+                </div>
                 <p>{currency(item.current_amount)} · {percentage}%</p>
               </div>
             </article>
