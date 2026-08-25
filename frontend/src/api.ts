@@ -125,6 +125,7 @@ export const deleteUser = (userId: number) => request<void>(`/users/${userId}`, 
 export const fetchBootstrap = () => request<BootstrapResponse>('/bootstrap')
 export const fetchOwnerPanel = () => request<OwnerPanelResponse>('/owner/panel')
 export const updateThemePreference = (themeId: string) => request<void>('/preferences/theme', { method: 'PUT', body: JSON.stringify({ theme_id: themeId }) })
+export const updateEmergencyFundPreference = (emergencyFundMonths: 3 | 6) => request<void>('/preferences/emergency-fund', { method: 'PUT', body: JSON.stringify({ emergency_fund_months: emergencyFundMonths }) })
 export const fetchIncomeSuggestion = (amount: number) => request<AllocationSuggestion>(`/suggestions/income?amount=${amount}`)
 export const createTransaction = (payload: TransactionInput) => request('/transactions', { method: 'POST', body: JSON.stringify(payload) })
 export const updateTransaction = (id: number, payload: TransactionInput) => request(`/transactions/${id}`, { method: 'PUT', body: JSON.stringify(payload) })

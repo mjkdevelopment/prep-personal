@@ -38,6 +38,7 @@ import {
   updateCreditCard,
   updateCreditCardStatement,
   updateDebt,
+  updateEmergencyFundPreference,
   updateFixedIncomeSource,
   updateObligation,
   updateTransaction,
@@ -1400,6 +1401,11 @@ function App() {
             setSelectedTheme(themeId)
             await updateThemePreference(themeId)
             setData((current) => (current ? { ...current, theme_id: themeId } : current))
+          }}
+          onEmergencyFundMonthsSelect={async (months) => {
+            await updateEmergencyFundPreference(months)
+            setData((current) => (current ? { ...current, emergency_fund_months: months, dashboard: { ...current.dashboard, emergency_fund_target: current.dashboard.monthly_fixed_outflow_total * months, emergency_fund_gap: Math.max((current.dashboard.monthly_fixed_outflow_total * months) - current.dashboard.emergency_fund_current, 0), investable_surplus: Math.max(current.dashboard.emergency_fund_current - (current.dashboard.monthly_fixed_outflow_total * months), 0), investment_limit_amount: Math.max(current.dashboard.emergency_fund_current - (current.dashboard.monthly_fixed_outflow_total * months), 0) * 0.30, investment_unlocked: current.dashboard.debt_total_balance <= 0 && Math.max((current.dashboard.monthly_fixed_outflow_total * months) - current.dashboard.emergency_fund_current, 0) <= 0 && (Math.max(current.dashboard.emergency_fund_current - (current.dashboard.monthly_fixed_outflow_total * months), 0) * 0.30) > 0 } } : current))
+            await load()
           }}
           passwordForm={passwordForm}
           setPasswordForm={setPasswordForm}
@@ -2863,6 +2869,7 @@ function SettingsTab({
   monthClosePreview,
   selectedTheme,
   onThemeSelect,
+  onEmergencyFundMonthsSelect,
   passwordForm,
   setPasswordForm,
   categoryForm,
@@ -2901,6 +2908,7 @@ function SettingsTab({
   monthClosePreview: MonthCloseSnapshot | null
   selectedTheme: string
   onThemeSelect: (themeId: string) => Promise<void>
+  onEmergencyFundMonthsSelect: (months: 3 | 6) => Promise<void>
   passwordForm: { currentPassword: string; newPassword: string }
   setPasswordForm: Dispatch<SetStateAction<{ currentPassword: string; newPassword: string }>>
   categoryForm: CategoryConfigInput
@@ -2948,6 +2956,20 @@ function SettingsTab({
             </button>
           ))}
         </div>
+      </Panel>
+
+      <Panel title="Fondo de seguridad" subtitle="Elige la meta dinamica sobre gastos fijos reales.">
+        <div className="decision-grid">
+          <button type="button" className={data.emergency_fund_months === 3 ? 'theme-card active' : 'theme-card'} onClick={() => void onEmergencyFundMonthsSelect(3)}>
+            <strong>3 meses</strong>
+            <p>Mas flexible. Se recalcula automaticamente si tus fijos suben o bajan.</p>
+          </button>
+          <button type="button" className={data.emergency_fund_months === 6 ? 'theme-card active' : 'theme-card'} onClick={() => void onEmergencyFundMonthsSelect(6)}>
+            <strong>6 meses</strong>
+            <p>Mas conservador. Mantiene una reserva mas robusta ante cambios del ano.</p>
+          </button>
+        </div>
+        <div className="banner subtle">Meta actual: {currency(data.dashboard.emergency_fund_target)} sobre gastos fijos mensuales de {currency(data.dashboard.monthly_fixed_outflow_total)}.</div>
       </Panel>
 
       <Panel title="Seguridad" subtitle={`Cuenta activa: ${data.current_username}`}>

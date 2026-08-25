@@ -124,7 +124,7 @@ def suggest_income_allocation(amount: float, snapshot: FinancialSnapshot) -> All
     return AllocationSuggestion(for_obligations=_round(obligations_allocation), for_goals=_round(goals_allocation), for_personal=_round(personal_allocation), rationale=rationale)
 
 
-def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], debts: list[Debt], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], transactions: list[Transaction], categories: list[CategoryConfig]) -> DashboardSummary:
+def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], debts: list[Debt], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], transactions: list[Transaction], categories: list[CategoryConfig], emergency_fund_months: int = 3) -> DashboardSummary:
     now = datetime.now()
     del credit_cards
     transactions_by_id = {item.id: item for item in transactions}
@@ -147,7 +147,7 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     fixed_cost_overflow = max(obligations_target - fixed_cost_ceiling, 0)
     goals_target = (income_reported_this_month * 0.20) + fixed_cost_headroom
     capitalization_gap = max(goals_target - goals_reserved, 0)
-    emergency_fund_target = monthly_fixed_outflow_total * 3
+    emergency_fund_target = monthly_fixed_outflow_total * (emergency_fund_months if emergency_fund_months in {3, 6} else 3)
     emergency_fund_current = lifetime_savings_balance
     emergency_fund_gap = max(emergency_fund_target - emergency_fund_current, 0)
     investable_surplus = max(emergency_fund_current - emergency_fund_target, 0)
@@ -214,7 +214,7 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     if debt_total_balance > 0:
         insights.append(InsightView(title='Capitalizacion con prioridad deuda', body=f'Con tu politica 50/30/20, la capitalizacion objetivo del mes es {_round(goals_target):.0f} y debe ir primero a deuda hasta sanear el balance actual.'))
     elif emergency_fund_gap > 0:
-        insights.append(InsightView(title='Fondo de seguridad aun incompleto', body=f'Tu reserva sugerida es {_round(emergency_fund_target):.0f}; hoy llevas {_round(emergency_fund_current):.0f}. Antes de invertir conviene cerrar ese faltante.'))
+        insights.append(InsightView(title='Fondo de seguridad aun incompleto', body=f'Tu reserva sugerida de {emergency_fund_months if emergency_fund_months in {3, 6} else 3} meses es {_round(emergency_fund_target):.0f}; hoy llevas {_round(emergency_fund_current):.0f}. Antes de invertir conviene cerrar ese faltante.'))
     elif investment_unlocked:
         insights.append(InsightView(title='Inversion habilitada con limite sano', body=f'Ya cubriste deuda y fondo de seguridad. Puedes invertir hasta {_round(investment_limit_amount):.0f} del excedente liquido sin tocar tu base protegida.'))
     if income_reported_this_month < fixed_income_expected:
@@ -305,8 +305,9 @@ def build_month_close_snapshot(
     credit_card_statements: list[CreditCardStatement],
     transactions: list[Transaction],
     categories: list[CategoryConfig],
+    emergency_fund_months: int = 3,
 ) -> dict:
-    dashboard = build_dashboard(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories)
+    dashboard = build_dashboard(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories, emergency_fund_months)
     active_debts = [item for item in debts if item.active]
     debt_payment_target = _round(sum(item.monthly_payment_amount for item in active_debts))
     debt_total_balance = _round(sum(item.balance_amount for item in active_debts))
@@ -385,5 +386,5 @@ def build_month_close_snapshot(
     }
 
 
-def build_bootstrap(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], debts: list[Debt], month_close_snapshots: list[MonthCloseSnapshot], transactions: list[Transaction], categories: list[CategoryConfig], tags: list[TagConfig]) -> BootstrapResponse:
-    return BootstrapResponse(setup_complete=False, theme_id='emerald_editorial', current_username='', current_user_role=UserRole.operator, can_manage_users=False, can_edit_data=True, users=[], audit_events=[], fixed_income_sources=fixed_income_sources, obligations=obligations, credit_cards=credit_cards, credit_card_statements=credit_card_statements, debts=debts, month_close_snapshots=month_close_snapshots, transactions=transactions, categories=categories, tags=tags, wallets=DEFAULT_WALLETS, dashboard=build_dashboard(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories))
+def build_bootstrap(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], debts: list[Debt], month_close_snapshots: list[MonthCloseSnapshot], transactions: list[Transaction], categories: list[CategoryConfig], tags: list[TagConfig], emergency_fund_months: int = 3) -> BootstrapResponse:
+    return BootstrapResponse(setup_complete=False, theme_id='emerald_editorial', emergency_fund_months=emergency_fund_months if emergency_fund_months in {3, 6} else 3, current_username='', current_user_role=UserRole.operator, can_manage_users=False, can_edit_data=True, users=[], audit_events=[], fixed_income_sources=fixed_income_sources, obligations=obligations, credit_cards=credit_cards, credit_card_statements=credit_card_statements, debts=debts, month_close_snapshots=month_close_snapshots, transactions=transactions, categories=categories, tags=tags, wallets=DEFAULT_WALLETS, dashboard=build_dashboard(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories, emergency_fund_months))

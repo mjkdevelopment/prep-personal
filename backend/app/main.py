@@ -17,7 +17,7 @@ from starlette.background import BackgroundTask
 
 from .database import Database, UserRecord
 from .importer import import_flutter_database
-from .schemas import AdminBootstrapRequest, AuthStatus, CategoryConfigInput, CreditCardCreate, CreditCardStatementCreate, Debt, DebtCreate, FixedIncomeSourceCreate, FlutterImportSummary, InitialSetupPayload, LoginRequest, LoginResponse, MonthCloseSnapshot, ObligationCreate, OwnerPanelResponse, PasswordChangeRequest, TagConfigInput, ThemePreferenceUpdate, TransactionCreate, UserAccessUpdateRequest, UserCreateRequest
+from .schemas import AdminBootstrapRequest, AuthStatus, CategoryConfigInput, CreditCardCreate, CreditCardStatementCreate, Debt, DebtCreate, EmergencyFundPreferenceUpdate, FixedIncomeSourceCreate, FlutterImportSummary, InitialSetupPayload, LoginRequest, LoginResponse, MonthCloseSnapshot, ObligationCreate, OwnerPanelResponse, PasswordChangeRequest, TagConfigInput, ThemePreferenceUpdate, TransactionCreate, UserAccessUpdateRequest, UserCreateRequest
 from .services import FinancialSnapshot, build_bootstrap, build_month_close_snapshot, suggest_income_allocation
 
 
@@ -256,9 +256,10 @@ def owner_panel(user: UserRecord = Depends(require_owner)):
 
 @app.get('/api/bootstrap')
 def bootstrap(user: UserRecord = Depends(require_app_user)):
-    payload = build_bootstrap(*current_state(user.id))
+    payload = build_bootstrap(*current_state(user.id), emergency_fund_months=database.get_emergency_fund_months(user.id))
     payload.setup_complete = database.is_setup_complete(user.id)
     payload.theme_id = database.get_theme_id(user.id)
+    payload.emergency_fund_months = database.get_emergency_fund_months(user.id)
     payload.current_username = user.username
     payload.current_user_role = user.role
     payload.can_manage_users = user.can_manage_users
@@ -390,14 +391,14 @@ def list_month_close_snapshots(user: UserRecord = Depends(require_app_user)):
 @app.post('/api/month-close/current/preview', response_model=MonthCloseSnapshot)
 def preview_current_month_close(user: UserRecord = Depends(require_editor)):
     fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, _, transactions, categories, _ = current_state(user.id)
-    payload = build_month_close_snapshot(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories)
+    payload = build_month_close_snapshot(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories, database.get_emergency_fund_months(user.id))
     return MonthCloseSnapshot(id=0, is_preview=True, **payload)
 
 
 @app.post('/api/month-close/current', response_model=MonthCloseSnapshot)
 def generate_current_month_close(user: UserRecord = Depends(require_editor)):
     fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, _, transactions, categories, _ = current_state(user.id)
-    payload = build_month_close_snapshot(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories)
+    payload = build_month_close_snapshot(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories, database.get_emergency_fund_months(user.id))
     existing_snapshot = database.get_month_close_snapshot(user.id, payload['period_year'], payload['period_month'])
     if existing_snapshot is not None:
         raise HTTPException(status_code=409, detail='Ya existe un cierre oficial para este mes. Usa el preview para probar o espera al siguiente periodo.')
@@ -464,6 +465,12 @@ def update_theme_preference(payload: ThemePreferenceUpdate, user: UserRecord = D
     database.record_audit(user, 'update_theme', 'preference', payload.theme_id, 'Tema actualizado en esta cuenta.')
 
 
+@app.put('/api/preferences/emergency-fund', status_code=204)
+def update_emergency_fund_preference(payload: EmergencyFundPreferenceUpdate, user: UserRecord = Depends(require_app_user)):
+    database.set_emergency_fund_months(user.id, payload.emergency_fund_months)
+    database.record_audit(user, 'update_emergency_fund', 'preference', str(payload.emergency_fund_months), f'Reserva objetivo ajustada a {payload.emergency_fund_months} meses.')
+
+
 @app.post('/api/import/flutter-db', response_model=FlutterImportSummary)
 async def import_flutter_db(file: UploadFile = File(...), replace_existing: bool = Form(True), user: UserRecord = Depends(require_editor)):
     suffix = Path(file.filename or 'prep_personal.db').suffix or '.db'
@@ -515,9 +522,10 @@ def complete_initial_setup(payload: InitialSetupPayload, user: UserRecord = Depe
         [item.model_dump() for item in payload.fixed_income_sources],
         [item.model_dump() for item in payload.obligations],
     )
-    response = build_bootstrap(*current_state(user.id))
+    response = build_bootstrap(*current_state(user.id), emergency_fund_months=database.get_emergency_fund_months(user.id))
     response.setup_complete = True
     response.theme_id = database.get_theme_id(user.id)
+    response.emergency_fund_months = database.get_emergency_fund_months(user.id)
     response.current_username = user.username
     response.current_user_role = user.role
     response.can_manage_users = user.can_manage_users

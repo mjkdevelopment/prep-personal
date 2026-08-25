@@ -96,6 +96,58 @@ def test_bootstrap_contains_dashboard() -> None:
     assert payload['users'] == []
 
 
+def test_emergency_fund_preference_updates_dynamic_target() -> None:
+    headers = ensure_app_headers('reserveuser', '1234')
+    setup = client.post(
+        '/api/setup/complete',
+        json={
+            'fixed_income_sources': [
+                {
+                    'label': 'Nomina base',
+                    'amount': 10000,
+                    'cadence': 'monthly',
+                    'expected_day': 30,
+                    'expected_weekday': None,
+                    'wallet': 'Banco',
+                    'active': True,
+                }
+            ],
+            'obligations': [
+                {
+                    'label': 'Casa',
+                    'amount': 4000,
+                    'category_id': 'casa',
+                    'credit_card_id': None,
+                    'cadence': 'monthly',
+                    'due_day': 15,
+                    'due_weekday': None,
+                    'kind': 'Fija',
+                    'status': 'Pendiente',
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert setup.status_code == 200
+
+    initial = client.get('/api/bootstrap', headers=headers)
+    assert initial.status_code == 200
+    initial_payload = initial.json()
+    assert initial_payload['emergency_fund_months'] == 3
+    assert initial_payload['dashboard']['monthly_fixed_outflow_total'] == 4000
+    assert initial_payload['dashboard']['emergency_fund_target'] == 12000
+
+    update = client.put('/api/preferences/emergency-fund', json={'emergency_fund_months': 6}, headers=headers)
+    assert update.status_code == 204
+
+    refreshed = client.get('/api/bootstrap', headers=headers)
+    assert refreshed.status_code == 200
+    refreshed_payload = refreshed.json()
+    assert refreshed_payload['emergency_fund_months'] == 6
+    assert refreshed_payload['dashboard']['monthly_fixed_outflow_total'] == 4000
+    assert refreshed_payload['dashboard']['emergency_fund_target'] == 24000
+
+
 def test_auth_status_requires_login_for_authenticated_state() -> None:
     response = client.get('/api/auth/status')
     assert response.status_code == 200

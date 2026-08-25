@@ -260,6 +260,7 @@ export interface DashboardSummary {
 export interface BootstrapResponse {
   setup_complete: boolean
   theme_id: string
+  emergency_fund_months: 3 | 6
   current_username: string
   current_user_role: UserRole
   can_manage_users: boolean

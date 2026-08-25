@@ -23,6 +23,7 @@ class UserRecord:
     role: UserRole
     active: bool
     theme_id: str
+    emergency_fund_months: int
     setup_complete: bool
 
     @property
@@ -73,7 +74,7 @@ class Database:
             connection.execute('CREATE TABLE IF NOT EXISTS debts(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, label TEXT NOT NULL, lender TEXT NOT NULL, balance_amount REAL NOT NULL, monthly_payment_amount REAL NOT NULL, currency TEXT NOT NULL, payment_day INTEGER, allow_extra_payment INTEGER NOT NULL, active INTEGER NOT NULL, notes TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS month_close_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, closed_at_iso TEXT NOT NULL, income_expected REAL NOT NULL, income_reported REAL NOT NULL, income_delta REAL NOT NULL, income_delta_percent REAL NOT NULL, obligations_target REAL NOT NULL, obligations_reserved REAL NOT NULL, pending_obligations REAL NOT NULL, cash_on_hand REAL NOT NULL, structural_margin REAL NOT NULL, available_margin_now REAL NOT NULL, recommended_personal_remaining REAL NOT NULL, overdue_obligations_amount REAL NOT NULL DEFAULT 0, next_cycle_obligations_amount REAL NOT NULL DEFAULT 0, next_cycle_start_buffer REAL NOT NULL DEFAULT 0, goals_shortfall_amount REAL NOT NULL DEFAULT 0, debt_payment_target REAL NOT NULL, debt_total_balance REAL NOT NULL, suggested_carryover_amount REAL NOT NULL, suggested_extra_debt_payment REAL NOT NULL, highlights_json TEXT NOT NULL, concerns_json TEXT NOT NULL, next_actions_json TEXT NOT NULL, UNIQUE(user_id, period_year, period_month))')
             connection.execute('CREATE TABLE IF NOT EXISTS app_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at_iso TEXT NOT NULL)')
-            connection.execute('CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, theme_id TEXT NOT NULL, setup_complete INTEGER NOT NULL, is_admin INTEGER NOT NULL, created_at_iso TEXT NOT NULL, updated_at_iso TEXT NOT NULL)')
+            connection.execute('CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, theme_id TEXT NOT NULL, emergency_fund_months INTEGER NOT NULL DEFAULT 3, setup_complete INTEGER NOT NULL, is_admin INTEGER NOT NULL, created_at_iso TEXT NOT NULL, updated_at_iso TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS trusted_sessions(token_hash TEXT PRIMARY KEY, user_id INTEGER, device_name TEXT NOT NULL, created_at_iso TEXT NOT NULL, last_used_at_iso TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS audit_events(id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_username TEXT NOT NULL, action TEXT NOT NULL, target_type TEXT NOT NULL, target_value TEXT NOT NULL, detail TEXT NOT NULL, created_at_iso TEXT NOT NULL)')
 
@@ -86,6 +87,7 @@ class Database:
             self._ensure_column(connection, 'transactions', 'credit_card_statement_id', 'INTEGER')
             self._ensure_column(connection, 'trusted_sessions', 'user_id', 'INTEGER')
             self._ensure_column(connection, 'users', 'theme_id', "TEXT NOT NULL DEFAULT 'emerald_editorial'")
+            self._ensure_column(connection, 'users', 'emergency_fund_months', 'INTEGER NOT NULL DEFAULT 3')
             self._ensure_column(connection, 'users', 'setup_complete', 'INTEGER NOT NULL DEFAULT 0')
             self._ensure_column(connection, 'users', 'is_admin', 'INTEGER NOT NULL DEFAULT 0')
             self._ensure_column(connection, 'users', 'role', "TEXT NOT NULL DEFAULT 'operator'")
@@ -377,6 +379,18 @@ class Database:
     def set_theme_id(self, user_id: int, theme_id: str) -> None:
         with self.connect() as connection:
             connection.execute('UPDATE users SET theme_id = ?, updated_at_iso = ? WHERE id = ?', (theme_id, datetime.now().isoformat(), user_id))
+
+    def get_emergency_fund_months(self, user_id: int) -> int:
+        with self.connect() as connection:
+            row = connection.execute('SELECT emergency_fund_months FROM users WHERE id = ? LIMIT 1', (user_id,)).fetchone()
+            months = int(row['emergency_fund_months']) if row and row['emergency_fund_months'] else 3
+            return months if months in {3, 6} else 3
+
+    def set_emergency_fund_months(self, user_id: int, months: int) -> None:
+        if months not in {3, 6}:
+            raise ValueError('La reserva de seguridad solo permite 3 o 6 meses.')
+        with self.connect() as connection:
+            connection.execute('UPDATE users SET emergency_fund_months = ?, updated_at_iso = ? WHERE id = ?', (months, datetime.now().isoformat(), user_id))
 
     def list_fixed_income_sources(self, user_id: int) -> list[FixedIncomeSource]:
         with self.connect() as connection:
@@ -1102,6 +1116,7 @@ class Database:
             role=UserRole(str(row['role']) if row['role'] else ('owner' if row['is_admin'] else 'operator')),
             active=bool(row['active']) if row['active'] is not None else True,
             theme_id=str(row['theme_id']),
+            emergency_fund_months=int(row['emergency_fund_months']) if row['emergency_fund_months'] in {3, 6} else 3,
             setup_complete=bool(row['setup_complete']),
         )
 

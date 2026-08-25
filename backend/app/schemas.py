@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -359,6 +359,7 @@ class DashboardSummary(BaseModel):
 class BootstrapResponse(BaseModel):
     setup_complete: bool
     theme_id: str
+    emergency_fund_months: Literal[3, 6] = 3
     current_username: str
     current_user_role: UserRole
     can_manage_users: bool
@@ -473,3 +474,7 @@ class PasswordChangeRequest(BaseModel):
 
 class ThemePreferenceUpdate(BaseModel):
     theme_id: str = Field(min_length=1)
+
+
+class EmergencyFundPreferenceUpdate(BaseModel):
+    emergency_fund_months: Literal[3, 6]
