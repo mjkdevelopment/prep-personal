@@ -150,6 +150,98 @@ def test_imports_flutter_database_file() -> None:
     assert bootstrap_payload['setup_complete'] is True
 
 
+def test_exports_current_user_backup_as_sqlite() -> None:
+    headers = ensure_app_headers('mjk', '1234')
+    setup = client.post(
+        '/api/setup/complete',
+        json={
+            'fixed_income_sources': [
+                {
+                    'label': 'Nomina base',
+                    'amount': 10000,
+                    'cadence': 'monthly',
+                    'expected_day': 30,
+                    'expected_weekday': None,
+                    'wallet': 'Banco',
+                    'active': True,
+                }
+            ],
+            'obligations': [
+                {
+                    'label': 'Casa',
+                    'amount': 4000,
+                    'category_id': 'casa',
+                    'credit_card_id': None,
+                    'cadence': 'monthly',
+                    'due_day': 15,
+                    'due_weekday': None,
+                    'kind': 'Fija',
+                    'status': 'Pendiente',
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert setup.status_code == 200
+
+    bootstrap = client.get('/api/bootstrap', headers=headers).json()
+    obligation_id = bootstrap['obligations'][0]['id']
+
+    transaction = client.post(
+        '/api/transactions',
+        json={
+            'kind': 'gasto',
+            'amount': 1500,
+            'wallet': 'Banco',
+            'category': 'Casa',
+            'fixed_income_source_id': None,
+            'obligation_id': obligation_id,
+            'credit_card_statement_id': None,
+            'tags': ['Exportado'],
+            'notes': 'Abono de prueba',
+            'date': '2026-08-02T10:00:00',
+            'recurring': False,
+        },
+        headers=headers,
+    )
+    assert transaction.status_code == 200
+
+    export_response = client.get('/api/export/current-db', headers=headers)
+    assert export_response.status_code == 200
+    assert export_response.headers['content-type'].startswith('application/vnd.sqlite3')
+
+    assert _temp_directory is not None
+    export_path = Path(_temp_directory.name) / 'exported_user.sqlite3'
+    export_path.write_bytes(export_response.content)
+
+    backup_connection = sqlite3.connect(export_path)
+    try:
+        fixed_income_count = backup_connection.execute('SELECT COUNT(*) FROM fixed_income_sources').fetchone()[0]
+        obligation_count = backup_connection.execute('SELECT COUNT(*) FROM obligations').fetchone()[0]
+        transaction_row = backup_connection.execute('SELECT category, tags_json, notes FROM transactions LIMIT 1').fetchone()
+        meta_source = backup_connection.execute("SELECT value FROM export_meta WHERE key = 'source'").fetchone()[0]
+        table_names = {row[0] for row in backup_connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        backup_connection.close()
+
+    assert fixed_income_count == 1
+    assert obligation_count == 1
+    assert transaction_row[0] == 'Casa'
+    assert 'Exportado' in json.loads(transaction_row[1])
+    assert transaction_row[2] == 'Abono de prueba'
+    assert meta_source == 'gride_ledger_user_backup_v1'
+    assert 'users' not in table_names
+
+
+def test_export_current_user_backup_is_forbidden_for_other_users() -> None:
+    headers = ensure_app_headers('otrodev', '1234')
+
+    response = client.get('/api/export/current-db', headers=headers)
+
+    assert response.status_code == 403
+    assert 'solo esta habilitado para la cuenta mjk' in response.json()['detail']
+
+
 def test_complete_and_reset_setup_flow() -> None:
     headers = ensure_app_headers('setupuser', '1234')
     response = client.post(

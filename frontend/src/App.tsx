@@ -24,6 +24,7 @@ import {
   fetchIncomeSuggestion,
   fetchOwnerPanel,
   importFlutterDatabase,
+  exportCurrentDatabase,
   login,
   loginOwner,
   logout,
@@ -547,6 +548,7 @@ function App() {
   const [suggestion, setSuggestion] = useState<AllocationSuggestion | null>(null)
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [importResult, setImportResult] = useState<FlutterImportSummary | null>(null)
 
   useEffect(() => {
@@ -973,6 +975,26 @@ function App() {
     }
   }
 
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const backup = await exportCurrentDatabase()
+      const objectUrl = window.URL.createObjectURL(backup)
+      const link = document.createElement('a')
+      const today = new Date().toISOString().slice(0, 10)
+      link.href = objectUrl
+      link.download = `gride-ledger-backup-${today}.sqlite3`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(objectUrl)
+    } catch (exportError) {
+      setError(resolveErrorMessage(exportError, 'No se pudo exportar la base actual.'))
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const handleReset = async () => {
     const confirmed = window.confirm('Se borraran ingresos fijos, gastos fijos y transacciones para volver al asistente inicial. Las categorias y tags personalizados se conservan.\n\n¿Deseas reiniciar?')
     if (!confirmed) {
@@ -1277,6 +1299,7 @@ function App() {
           canEditData={canEditData}
           saving={saving}
           importing={importing}
+          exporting={exporting}
           selectedTheme={selectedTheme}
           onThemeSelect={async (themeId) => {
             setSelectedTheme(themeId)
@@ -1338,6 +1361,7 @@ function App() {
           }}
           onImportFileChange={setImportFile}
           onImport={() => void handleImport()}
+          onExport={() => void handleExport()}
           onReset={() => void handleReset()}
           resetCategoryForm={() => {
             setEditingCategoryId(null)
@@ -2282,6 +2306,7 @@ function SettingsTab({
   canEditData,
   saving,
   importing,
+  exporting,
   selectedTheme,
   onThemeSelect,
   passwordForm,
@@ -2305,6 +2330,7 @@ function SettingsTab({
   onDeleteTag,
   onImportFileChange,
   onImport,
+  onExport,
   onReset,
   resetCategoryForm,
   resetTagForm,
@@ -2313,6 +2339,7 @@ function SettingsTab({
   canEditData: boolean
   saving: boolean
   importing: boolean
+  exporting: boolean
   selectedTheme: string
   onThemeSelect: (themeId: string) => Promise<void>
   passwordForm: { currentPassword: string; newPassword: string }
@@ -2336,10 +2363,13 @@ function SettingsTab({
   onDeleteTag: (tag: TagConfig) => Promise<void>
   onImportFileChange: (file: File | null) => void
   onImport: () => void
+  onExport: () => void
   onReset: () => void
   resetCategoryForm: () => void
   resetTagForm: () => void
 }) {
+  const canUseDevBackup = canEditData && data.current_username === 'mjk'
+
   return (
     <section className="settings-grid">
       <Panel title="Paletas">
@@ -2486,6 +2516,14 @@ function SettingsTab({
       <Panel title="Migracion y reset" subtitle="Importacion y reinicio.">
         <div className="column-stack">
           {!canEditData ? <p className="read-only-note">La importacion y el reinicio requieren una cuenta con permiso de edicion.</p> : null}
+          {canUseDevBackup ? (
+            <>
+              <div className="action-row">
+                <button type="button" disabled={exporting || !data || !canUseDevBackup} onClick={onExport}>{exporting ? 'Exportando...' : 'Exportar respaldo actual'}</button>
+              </div>
+              <p>Descarga un SQLite de desarrollo con ingresos, obligaciones, tarjetas, estados de cuenta, movimientos, categorias y tags del usuario actual.</p>
+            </>
+          ) : null}
           <label>
             Archivo SQLite legado
             <input type="file" accept=".db,.sqlite,.sqlite3" onChange={(event) => onImportFileChange(event.target.files?.[0] ?? null)} />

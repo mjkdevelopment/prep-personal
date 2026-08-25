@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadF
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 from .database import Database, UserRecord
 from .importer import import_flutter_database
@@ -146,6 +147,10 @@ def require_app_user(user: UserRecord = Depends(require_auth)) -> UserRecord:
     if user.is_owner:
         raise HTTPException(status_code=403, detail='La cuenta owner usa el panel /owner.')
     return user
+
+
+def can_export_dev_backup(user: UserRecord) -> bool:
+    return user.username == 'mjk'
 
 
 @app.get('/api/health')
@@ -419,6 +424,30 @@ async def import_flutter_db(file: UploadFile = File(...), replace_existing: bool
         raise HTTPException(status_code=400, detail=f'No se pudo importar la base Flutter: {exc}') from exc
     finally:
         Path(temp_path).unlink(missing_ok=True)
+
+
+@app.get('/api/export/current-db')
+def export_current_db(user: UserRecord = Depends(require_editor)):
+    if not can_export_dev_backup(user):
+        raise HTTPException(status_code=403, detail='Este respaldo de desarrollo solo esta habilitado para la cuenta mjk.')
+    safe_username = ''.join(char.lower() if char.isalnum() else '-' for char in user.username).strip('-') or 'usuario'
+    with NamedTemporaryFile(delete=False, suffix='.sqlite3') as temporary_file:
+        temp_path = temporary_file.name
+
+    try:
+        database.export_user_backup(user.id, temp_path)
+    except ValueError as exc:
+        Path(temp_path).unlink(missing_ok=True)
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    database.record_audit(user, 'export_current_db', 'export', safe_username, 'Respaldo SQLite del usuario exportado.')
+    filename = f'gride-ledger-{safe_username}-{datetime.now().date().isoformat()}.sqlite3'
+    return FileResponse(
+        temp_path,
+        media_type='application/vnd.sqlite3',
+        filename=filename,
+        background=BackgroundTask(lambda: Path(temp_path).unlink(missing_ok=True)),
+    )
 
 
 @app.post('/api/setup/complete')

@@ -640,6 +640,108 @@ class Database:
             connection.execute('DELETE FROM fixed_income_sources WHERE user_id = ?', (user_id,))
             connection.execute('UPDATE users SET setup_complete = 0, updated_at_iso = ? WHERE id = ?', (datetime.now().isoformat(), user_id))
 
+    def export_user_backup(self, user_id: int, destination_path: str) -> None:
+        destination = Path(destination_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            destination.unlink()
+
+        with self.connect() as source_connection:
+            user_row = source_connection.execute(
+                'SELECT username, theme_id, setup_complete FROM users WHERE id = ? LIMIT 1',
+                (user_id,),
+            ).fetchone()
+            if user_row is None:
+                raise ValueError('Usuario no encontrado para exportar.')
+
+            with sqlite3.connect(destination_path) as backup_connection:
+                backup_connection.execute('CREATE TABLE fixed_income_sources(id INTEGER PRIMARY KEY, label TEXT NOT NULL, amount REAL NOT NULL, cadence TEXT NOT NULL, expected_day INTEGER NOT NULL, expected_weekday INTEGER, wallet TEXT NOT NULL, active INTEGER NOT NULL)')
+                backup_connection.execute('CREATE TABLE obligations(id INTEGER PRIMARY KEY, label TEXT NOT NULL, amount REAL NOT NULL, category_id TEXT, credit_card_id INTEGER, cadence TEXT NOT NULL, due_day INTEGER NOT NULL, due_weekday INTEGER, kind TEXT NOT NULL, status TEXT NOT NULL)')
+                backup_connection.execute('CREATE TABLE transactions(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, amount REAL NOT NULL, wallet TEXT NOT NULL, category TEXT NOT NULL, fixed_income_source_id INTEGER, obligation_id INTEGER, credit_card_statement_id INTEGER, tags_json TEXT NOT NULL, notes TEXT NOT NULL, date_iso TEXT NOT NULL, recurring INTEGER NOT NULL)')
+                backup_connection.execute('CREATE TABLE credit_cards(id INTEGER PRIMARY KEY, label TEXT NOT NULL, last4 TEXT NOT NULL, closing_day INTEGER NOT NULL, due_day INTEGER NOT NULL, limit_amount REAL NOT NULL, active INTEGER NOT NULL)')
+                backup_connection.execute('CREATE TABLE credit_card_statements(id INTEGER PRIMARY KEY, credit_card_id INTEGER NOT NULL, statement_date_iso TEXT NOT NULL, due_date_iso TEXT NOT NULL, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, statement_amount REAL NOT NULL, notes TEXT NOT NULL)')
+                backup_connection.execute('CREATE TABLE credit_card_statement_items(id INTEGER PRIMARY KEY, statement_id INTEGER NOT NULL, obligation_id INTEGER NOT NULL, amount REAL NOT NULL)')
+                backup_connection.execute('CREATE TABLE categories(id TEXT PRIMARY KEY, label TEXT NOT NULL, scope TEXT NOT NULL, type TEXT NOT NULL, color_token TEXT NOT NULL, icon_token TEXT NOT NULL, active INTEGER NOT NULL)')
+                backup_connection.execute('CREATE TABLE tags(id TEXT PRIMARY KEY, label TEXT NOT NULL, color_token TEXT NOT NULL, active INTEGER NOT NULL, command_enabled INTEGER NOT NULL, preset_transaction_kind TEXT, preset_fixed_income_source_id INTEGER, preset_obligation_id INTEGER, preset_settlement_mode TEXT, preset_amount REAL, preset_wallet TEXT, preset_category TEXT, preset_recurring INTEGER)')
+                backup_connection.execute('CREATE TABLE export_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+
+                fixed_income_rows = source_connection.execute(
+                    'SELECT id, label, amount, cadence, expected_day, expected_weekday, wallet, active FROM fixed_income_sources WHERE user_id = ? ORDER BY id ASC',
+                    (user_id,),
+                ).fetchall()
+                obligation_rows = source_connection.execute(
+                    'SELECT id, label, amount, category_id, credit_card_id, cadence, due_day, due_weekday, kind, status FROM obligations WHERE user_id = ? ORDER BY id ASC',
+                    (user_id,),
+                ).fetchall()
+                transaction_rows = source_connection.execute(
+                    'SELECT id, kind, amount, wallet, category, fixed_income_source_id, obligation_id, credit_card_statement_id, tags_json, notes, date_iso, recurring FROM transactions WHERE user_id = ? ORDER BY id ASC',
+                    (user_id,),
+                ).fetchall()
+                credit_card_rows = source_connection.execute(
+                    'SELECT id, label, last4, closing_day, due_day, limit_amount, active FROM credit_cards WHERE user_id = ? ORDER BY id ASC',
+                    (user_id,),
+                ).fetchall()
+                statement_rows = source_connection.execute(
+                    'SELECT id, credit_card_id, statement_date_iso, due_date_iso, period_year, period_month, statement_amount, notes FROM credit_card_statements WHERE user_id = ? ORDER BY id ASC',
+                    (user_id,),
+                ).fetchall()
+                statement_item_rows = source_connection.execute(
+                    'SELECT items.id, items.statement_id, items.obligation_id, items.amount FROM credit_card_statement_items AS items JOIN credit_card_statements AS statements ON statements.id = items.statement_id WHERE statements.user_id = ? ORDER BY items.id ASC',
+                    (user_id,),
+                ).fetchall()
+                category_rows = source_connection.execute(
+                    'SELECT id, label, scope, type, color_token, icon_token, active FROM categories WHERE user_id = ? ORDER BY id ASC',
+                    (user_id,),
+                ).fetchall()
+                tag_rows = source_connection.execute(
+                    'SELECT id, label, color_token, active, command_enabled, preset_transaction_kind, preset_fixed_income_source_id, preset_obligation_id, preset_settlement_mode, preset_amount, preset_wallet, preset_category, preset_recurring FROM tags WHERE user_id = ? ORDER BY id ASC',
+                    (user_id,),
+                ).fetchall()
+
+                backup_connection.executemany(
+                    'INSERT INTO fixed_income_sources(id, label, amount, cadence, expected_day, expected_weekday, wallet, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)',
+                    [tuple(row) for row in fixed_income_rows],
+                )
+                backup_connection.executemany(
+                    'INSERT INTO obligations(id, label, amount, category_id, credit_card_id, cadence, due_day, due_weekday, kind, status) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [tuple(row) for row in obligation_rows],
+                )
+                backup_connection.executemany(
+                    'INSERT INTO transactions(id, kind, amount, wallet, category, fixed_income_source_id, obligation_id, credit_card_statement_id, tags_json, notes, date_iso, recurring) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [tuple(row) for row in transaction_rows],
+                )
+                backup_connection.executemany(
+                    'INSERT INTO credit_cards(id, label, last4, closing_day, due_day, limit_amount, active) VALUES(?, ?, ?, ?, ?, ?, ?)',
+                    [tuple(row) for row in credit_card_rows],
+                )
+                backup_connection.executemany(
+                    'INSERT INTO credit_card_statements(id, credit_card_id, statement_date_iso, due_date_iso, period_year, period_month, statement_amount, notes) VALUES(?, ?, ?, ?, ?, ?, ?, ?)',
+                    [tuple(row) for row in statement_rows],
+                )
+                backup_connection.executemany(
+                    'INSERT INTO credit_card_statement_items(id, statement_id, obligation_id, amount) VALUES(?, ?, ?, ?)',
+                    [tuple(row) for row in statement_item_rows],
+                )
+                backup_connection.executemany(
+                    'INSERT INTO categories(id, label, scope, type, color_token, icon_token, active) VALUES(?, ?, ?, ?, ?, ?, ?)',
+                    [tuple(row) for row in category_rows],
+                )
+                backup_connection.executemany(
+                    'INSERT INTO tags(id, label, color_token, active, command_enabled, preset_transaction_kind, preset_fixed_income_source_id, preset_obligation_id, preset_settlement_mode, preset_amount, preset_wallet, preset_category, preset_recurring) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [tuple(row) for row in tag_rows],
+                )
+                backup_connection.executemany(
+                    'INSERT INTO export_meta(key, value) VALUES(?, ?)',
+                    [
+                        ('exported_at_iso', datetime.now().isoformat()),
+                        ('username', str(user_row['username'])),
+                        ('theme_id', str(user_row['theme_id'] or 'emerald_editorial')),
+                        ('setup_complete', 'true' if bool(user_row['setup_complete']) else 'false'),
+                        ('source', 'gride_ledger_user_backup_v1'),
+                    ],
+                )
+                backup_connection.commit()
+
     def list_categories(self, user_id: int) -> list[CategoryConfig]:
         with self.connect() as connection:
             self._ensure_default_catalogs(connection, user_id)

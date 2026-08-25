@@ -71,6 +71,29 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const sessionToken = getSessionToken()
+  const headers = new Headers(init?.headers ?? undefined)
+  if (sessionToken) {
+    headers.set('x-session-token', sessionToken)
+  }
+
+  const response = await fetch(`${apiBase}${path}`, {
+    headers,
+    ...init,
+  })
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearSessionToken()
+    }
+    const text = await response.text()
+    throw new Error(text || `Request failed with ${response.status}`)
+  }
+
+  return response.blob()
+}
+
 export const fetchAuthStatus = () => request<AuthStatus>('/auth/status')
 export async function bootstrapOwner(username: string, password: string, bootstrapCode: string, deviceName: string): Promise<LoginResponse> {
   const response = await request<LoginResponse>('/auth/bootstrap-owner', { method: 'POST', body: JSON.stringify({ username, password, bootstrap_code: bootstrapCode, device_name: deviceName }) })
@@ -129,3 +152,5 @@ export async function importFlutterDatabase(file: File, replaceExisting = true):
   formData.append('replace_existing', String(replaceExisting))
   return request<FlutterImportSummary>('/import/flutter-db', { method: 'POST', body: formData })
 }
+
+export const exportCurrentDatabase = () => requestBlob('/export/current-db')
