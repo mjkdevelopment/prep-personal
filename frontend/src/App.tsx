@@ -1726,43 +1726,50 @@ function MonthClosePreviewOverlay({
 
         <section className="month-close-hero-grid">
           <article className={`month-close-score-card score-${scoreTone}`}>
-            <div className="month-close-score-top">
-              <div>
-                <span className="metric-kicker">Score del cierre</span>
-                <strong>{healthScore}/100</strong>
-              </div>
-              <span className={`month-close-score-pill tone-${scoreTone}`}>{scoreLabel}</span>
-            </div>
-            <p>{scoreNarrative}</p>
-            <div className="progress-bar month-close-score-bar"><div style={{ width: `${healthScore}%` }} /></div>
-            <div className="month-close-score-breakdown">
-              {scoreBreakdown.map((item) => (
-                <article key={item.label} className="month-close-score-item">
-                  <div className="month-close-score-item-head">
-                    <strong>{item.label}</strong>
-                    <span>{item.earnedPoints}/{item.maxPoints} pts</span>
+            <div className="month-close-score-shell">
+              <div className="month-close-score-summary">
+                <div className="month-close-score-top">
+                  <div>
+                    <span className="metric-kicker">Score del cierre</span>
+                    <strong>{healthScore}/100</strong>
                   </div>
-                  <div className="progress-bar month-close-score-item-bar"><div style={{ width: `${item.ratio * 100}%` }} /></div>
-                  <small>{item.helper}</small>
-                </article>
-              ))}
+                  <span className={`month-close-score-pill tone-${scoreTone}`}>{scoreLabel}</span>
+                </div>
+                <p>{scoreNarrative}</p>
+                <div className="progress-bar month-close-score-bar"><div style={{ width: `${healthScore}%` }} /></div>
+              </div>
+              <div className="month-close-score-breakdown">
+                {scoreBreakdown.map((item) => (
+                  <article key={item.label} className="month-close-score-item">
+                    <div className="month-close-score-item-head">
+                      <strong>{item.label}</strong>
+                      <span>{item.earnedPoints}/{item.maxPoints} pts</span>
+                    </div>
+                    <div className="progress-bar month-close-score-item-bar"><div style={{ width: `${item.ratio * 100}%` }} /></div>
+                    <small>{item.helper}</small>
+                  </article>
+                ))}
+              </div>
             </div>
           </article>
-          <article className="free-margin-card emphasis month-close-hero-card">
-            <span className="metric-kicker">Carryover sugerido</span>
-            <strong>{currency(snapshot.suggested_carryover_amount)}</strong>
-            <p>Incluye arrastre vencido y buffer recomendado para arrancar el siguiente ciclo con estructura.</p>
-          </article>
-          <article className="free-margin-card month-close-hero-card">
-            <span className="metric-kicker">Abono extra a deuda</span>
-            <strong>{currency(snapshot.suggested_extra_debt_payment)}</strong>
-            <p>{snapshot.debt_total_balance > 0 ? `Sobre una deuda activa total de ${currency(snapshot.debt_total_balance)}.` : 'No hay deuda activa elegible para abonos extra.'}</p>
-          </article>
-          <article className="free-margin-card month-close-hero-card">
-            <span className="metric-kicker">Liquidez al corte</span>
-            <strong>{currency(snapshot.cash_on_hand)}</strong>
-            <p>Lectura de efectivo registrado contra margen disponible actual de {currency(snapshot.available_margin_now)}.</p>
-          </article>
+
+          <div className="month-close-spotlight-grid">
+            <article className="free-margin-card emphasis month-close-spotlight-card">
+              <span className="metric-kicker">Carryover sugerido</span>
+              <strong>{currency(snapshot.suggested_carryover_amount)}</strong>
+              <p>Incluye arrastre vencido y buffer recomendado para arrancar el siguiente ciclo con estructura.</p>
+            </article>
+            <article className="free-margin-card month-close-spotlight-card">
+              <span className="metric-kicker">Abono extra a deuda</span>
+              <strong>{currency(snapshot.suggested_extra_debt_payment)}</strong>
+              <p>{snapshot.debt_total_balance > 0 ? `Sobre una deuda activa total de ${currency(snapshot.debt_total_balance)}.` : 'No hay deuda activa elegible para abonos extra.'}</p>
+            </article>
+            <article className="free-margin-card month-close-spotlight-card month-close-spotlight-wide">
+              <span className="metric-kicker">Liquidez al corte</span>
+              <strong>{currency(snapshot.cash_on_hand)}</strong>
+              <p>Lectura de efectivo registrado contra margen disponible actual de {currency(snapshot.available_margin_now)}.</p>
+            </article>
+          </div>
         </section>
 
         <section className="month-close-preview-grid">
