@@ -1546,22 +1546,114 @@ function HelpDock({ compact = false }: { compact?: boolean }) {
 function MonthClosePreviewOverlay({
   snapshot,
   dashboard,
+  monthCloseSnapshots,
   onClose,
   onCommit,
   busy,
 }: {
   snapshot: MonthCloseSnapshot
   dashboard: BootstrapResponse['dashboard']
+  monthCloseSnapshots: MonthCloseSnapshot[]
   onClose: () => void
   onCommit: () => void
   busy: boolean
 }) {
+  const previousSnapshot = monthCloseSnapshots
+    .slice()
+    .sort((left, right) => ((right.period_year * 100) + right.period_month) - ((left.period_year * 100) + left.period_month))[0] ?? null
   const incomeCompletionRatio = snapshot.income_expected <= 0 ? 0 : Math.min(snapshot.income_reported / snapshot.income_expected, 1)
   const obligationsCoverageRatio = snapshot.obligations_target <= 0 ? 0 : Math.min(snapshot.obligations_reserved / snapshot.obligations_target, 1)
   const extraDebtRatio = snapshot.debt_total_balance <= 0 ? 0 : Math.min(snapshot.suggested_extra_debt_payment / snapshot.debt_total_balance, 1)
   const nextCycleBufferRatio = (snapshot.next_cycle_obligations_amount + snapshot.goals_shortfall_amount) <= 0
     ? 0
     : Math.min(snapshot.next_cycle_start_buffer / (snapshot.next_cycle_obligations_amount + snapshot.goals_shortfall_amount), 1)
+  const liquidityProtectionRatio = snapshot.structural_margin <= 0 ? 1 : Math.min(snapshot.cash_on_hand / snapshot.structural_margin, 1)
+  const healthScore = Math.max(0, Math.min(100,
+    Math.round(
+      (incomeCompletionRatio * 24)
+      + (obligationsCoverageRatio * 24)
+      + (nextCycleBufferRatio * 18)
+      + (liquidityProtectionRatio * 16)
+      + ((snapshot.debt_total_balance <= 0 || snapshot.suggested_extra_debt_payment > 0) ? 10 : 4)
+      + (snapshot.overdue_obligations_amount <= 0 ? 8 : 0),
+    ),
+  ))
+  const scoreTone = healthScore >= 80 ? 'positive' : healthScore >= 60 ? 'warning' : 'critical'
+  const scoreLabel = healthScore >= 80 ? 'Mes robusto' : healthScore >= 60 ? 'Mes vigilado' : 'Mes fragil'
+  const scoreNarrative = snapshot.overdue_obligations_amount > 0
+    ? 'El cierre necesita disciplina inmediata porque todavia arrastra vencidos.'
+    : snapshot.next_cycle_start_buffer < snapshot.next_cycle_obligations_amount
+      ? 'El mes cierra sin crisis, pero el siguiente ciclo todavia arranca corto.'
+      : snapshot.suggested_extra_debt_payment > 0
+        ? 'La estructura ya permite empezar a acelerar deuda sin comprometer base.'
+        : 'La base del mes esta razonablemente cuidada y lista para consolidarse.'
+
+  const formatDelta = (value: number): string => `${value >= 0 ? '+' : '-'}${currency(Math.abs(value))}`
+  const compareClassName = (value: number, positiveIsGood = true): string => {
+    if (value === 0) {
+      return 'amount neutral'
+    }
+    const favorable = positiveIsGood ? value > 0 : value < 0
+    return favorable ? 'amount positive' : 'amount negative'
+  }
+
+  const previousComparisons = previousSnapshot ? [
+    {
+      label: 'Carryover sugerido',
+      current: snapshot.suggested_carryover_amount,
+      previous: previousSnapshot.suggested_carryover_amount,
+      positiveIsGood: true,
+    },
+    {
+      label: 'Margen disponible',
+      current: snapshot.available_margin_now,
+      previous: previousSnapshot.available_margin_now,
+      positiveIsGood: true,
+    },
+    {
+      label: 'Arrastre vencido',
+      current: snapshot.overdue_obligations_amount,
+      previous: previousSnapshot.overdue_obligations_amount,
+      positiveIsGood: false,
+    },
+    {
+      label: 'Abono extra deuda',
+      current: snapshot.suggested_extra_debt_payment,
+      previous: previousSnapshot.suggested_extra_debt_payment,
+      positiveIsGood: true,
+    },
+  ] : []
+
+  const baseComparisons = [
+    {
+      label: 'Ingreso vs base',
+      current: snapshot.income_reported,
+      target: snapshot.income_expected,
+      helper: `${currency(snapshot.income_reported)} de ${currency(snapshot.income_expected)}`,
+      positiveIsGood: true,
+    },
+    {
+      label: 'Obligaciones cubiertas',
+      current: snapshot.obligations_reserved,
+      target: snapshot.obligations_target,
+      helper: `${currency(snapshot.obligations_reserved)} de ${currency(snapshot.obligations_target)}`,
+      positiveIsGood: true,
+    },
+    {
+      label: 'Buffer siguiente ciclo',
+      current: snapshot.next_cycle_start_buffer,
+      target: snapshot.next_cycle_obligations_amount + snapshot.goals_shortfall_amount,
+      helper: `${currency(snapshot.next_cycle_start_buffer)} de ${currency(snapshot.next_cycle_obligations_amount + snapshot.goals_shortfall_amount)}`,
+      positiveIsGood: true,
+    },
+    {
+      label: 'Liquidez sobre base estructural',
+      current: snapshot.cash_on_hand,
+      target: snapshot.structural_margin,
+      helper: `${currency(snapshot.cash_on_hand)} sobre base ${currency(snapshot.structural_margin)}`,
+      positiveIsGood: true,
+    },
+  ]
 
   return (
     <div className="help-backdrop month-close-backdrop" role="dialog" aria-modal="true" aria-label="Preview del cierre mensual" onClick={onClose}>
@@ -1584,6 +1676,17 @@ function MonthClosePreviewOverlay({
         </header>
 
         <section className="month-close-hero-grid">
+          <article className={`month-close-score-card score-${scoreTone}`}>
+            <div className="month-close-score-top">
+              <div>
+                <span className="metric-kicker">Score del cierre</span>
+                <strong>{healthScore}/100</strong>
+              </div>
+              <span className={`month-close-score-pill tone-${scoreTone}`}>{scoreLabel}</span>
+            </div>
+            <p>{scoreNarrative}</p>
+            <div className="progress-bar month-close-score-bar"><div style={{ width: `${healthScore}%` }} /></div>
+          </article>
           <article className="free-margin-card emphasis month-close-hero-card">
             <span className="metric-kicker">Carryover sugerido</span>
             <strong>{currency(snapshot.suggested_carryover_amount)}</strong>
@@ -1636,6 +1739,28 @@ function MonthClosePreviewOverlay({
                 </div>
               </div>
             </article>
+
+            <article className="panel month-close-section-card month-close-comparison-card">
+              <header className="panel-head">
+                <div className="panel-title-wrap"><span className="panel-orb" /><div><h2>Comparativo contra la base ideal</h2><p>Que tan cerca esta el mes de la estructura que deberia proteger.</p></div></div>
+              </header>
+              <div className="month-close-comparison-grid">
+                {baseComparisons.map((item) => {
+                  const delta = item.current - item.target
+                  const ratio = item.target <= 0 ? 1 : Math.min(item.current / item.target, 1)
+                  return (
+                    <article key={item.label} className="month-close-compare-card">
+                      <div className="month-close-compare-head">
+                        <strong>{item.label}</strong>
+                        <span className={compareClassName(delta, item.positiveIsGood)}>{formatDelta(delta)}</span>
+                      </div>
+                      <div className="progress-bar"><div style={{ width: `${ratio * 100}%` }} /></div>
+                      <small>{item.helper}</small>
+                    </article>
+                  )
+                })}
+              </div>
+            </article>
           </div>
 
           <div className="month-close-preview-column">
@@ -1675,6 +1800,42 @@ function MonthClosePreviewOverlay({
                   </div>
                 </div>
               </div>
+            </article>
+
+            <article className="panel month-close-section-card month-close-comparison-card">
+              <header className="panel-head">
+                <div className="panel-title-wrap"><span className="panel-orb" /><div><h2>Comparativo contra el ultimo cierre</h2><p>Lectura rapida de mejora o deterioro frente al cierre oficial anterior.</p></div></div>
+              </header>
+              {previousSnapshot ? (
+                <>
+                  <div className="banner subtle month-close-previous-banner">Base de comparacion: {previousSnapshot.period_month}/{previousSnapshot.period_year}</div>
+                  <div className="month-close-comparison-grid">
+                    {previousComparisons.map((item) => {
+                      const delta = item.current - item.previous
+                      return (
+                        <article key={item.label} className="month-close-compare-card">
+                          <div className="month-close-compare-head">
+                            <strong>{item.label}</strong>
+                            <span className={compareClassName(delta, item.positiveIsGood)}>{formatDelta(delta)}</span>
+                          </div>
+                          <div className="month-close-compare-values">
+                            <div>
+                              <span>Actual</span>
+                              <strong>{currency(item.current)}</strong>
+                            </div>
+                            <div>
+                              <span>Anterior</span>
+                              <strong>{currency(item.previous)}</strong>
+                            </div>
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div className="banner subtle">Todavia no existe un cierre oficial anterior para comparar este preview.</div>
+              )}
             </article>
           </div>
         </section>
@@ -2887,7 +3048,7 @@ function SettingsTab({
           </div>
         </div>
       </Panel>
-      {monthClosePreview ? <MonthClosePreviewOverlay snapshot={monthClosePreview} dashboard={data.dashboard} onClose={onDismissMonthClosePreview} onCommit={onGenerateMonthClose} busy={closingMonth} /> : null}
+      {monthClosePreview ? <MonthClosePreviewOverlay snapshot={monthClosePreview} dashboard={data.dashboard} monthCloseSnapshots={data.month_close_snapshots} onClose={onDismissMonthClosePreview} onCommit={onGenerateMonthClose} busy={closingMonth} /> : null}
       <HelpDock />
     </section>
   )
