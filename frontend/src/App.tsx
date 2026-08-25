@@ -1459,6 +1459,7 @@ function App() {
           onExport={() => void handleExport()}
           onPreviewMonthClose={() => void handlePreviewMonthClose()}
           onGenerateMonthClose={() => void handleGenerateMonthClose()}
+          onDismissMonthClosePreview={() => setMonthClosePreview(null)}
           onReset={() => void handleReset()}
           resetCategoryForm={() => {
             setEditingCategoryId(null)
@@ -1539,6 +1540,146 @@ function HelpDock({ compact = false }: { compact?: boolean }) {
         </div>
       ) : null}
     </>
+  )
+}
+
+function MonthClosePreviewOverlay({
+  snapshot,
+  dashboard,
+  onClose,
+  onCommit,
+  busy,
+}: {
+  snapshot: MonthCloseSnapshot
+  dashboard: BootstrapResponse['dashboard']
+  onClose: () => void
+  onCommit: () => void
+  busy: boolean
+}) {
+  const incomeCompletionRatio = snapshot.income_expected <= 0 ? 0 : Math.min(snapshot.income_reported / snapshot.income_expected, 1)
+  const obligationsCoverageRatio = snapshot.obligations_target <= 0 ? 0 : Math.min(snapshot.obligations_reserved / snapshot.obligations_target, 1)
+  const extraDebtRatio = snapshot.debt_total_balance <= 0 ? 0 : Math.min(snapshot.suggested_extra_debt_payment / snapshot.debt_total_balance, 1)
+  const nextCycleBufferRatio = (snapshot.next_cycle_obligations_amount + snapshot.goals_shortfall_amount) <= 0
+    ? 0
+    : Math.min(snapshot.next_cycle_start_buffer / (snapshot.next_cycle_obligations_amount + snapshot.goals_shortfall_amount), 1)
+
+  return (
+    <div className="help-backdrop month-close-backdrop" role="dialog" aria-modal="true" aria-label="Preview del cierre mensual" onClick={onClose}>
+      <section className="help-card month-close-preview-card" onClick={(event) => event.stopPropagation()}>
+        <header className="help-head month-close-preview-head">
+          <div className="month-close-preview-lockup">
+            <div className="month-close-preview-mark">
+              <VisualBadge iconToken="calendar" colorToken="sky" />
+            </div>
+            <div>
+              <p className="eyebrow">Preview no guardado</p>
+              <h2>Cierre {snapshot.period_month}/{snapshot.period_year}</h2>
+              <p className="month-close-preview-copy">Vista ejecutiva del mes actual antes de comprometer un cierre oficial. Sirve para probar criterio, no escribe nada en la base.</p>
+            </div>
+          </div>
+          <div className="action-row">
+            <button type="button" className="ghost" onClick={onClose}>Cerrar</button>
+            <button type="button" disabled={busy} onClick={onCommit}>{busy ? 'Guardando...' : 'Guardar cierre oficial'}</button>
+          </div>
+        </header>
+
+        <section className="month-close-hero-grid">
+          <article className="free-margin-card emphasis month-close-hero-card">
+            <span className="metric-kicker">Carryover sugerido</span>
+            <strong>{currency(snapshot.suggested_carryover_amount)}</strong>
+            <p>Incluye arrastre vencido y buffer recomendado para arrancar el siguiente ciclo con estructura.</p>
+          </article>
+          <article className="free-margin-card month-close-hero-card">
+            <span className="metric-kicker">Abono extra a deuda</span>
+            <strong>{currency(snapshot.suggested_extra_debt_payment)}</strong>
+            <p>{snapshot.debt_total_balance > 0 ? `Sobre una deuda activa total de ${currency(snapshot.debt_total_balance)}.` : 'No hay deuda activa elegible para abonos extra.'}</p>
+          </article>
+          <article className="free-margin-card month-close-hero-card">
+            <span className="metric-kicker">Liquidez al corte</span>
+            <strong>{currency(snapshot.cash_on_hand)}</strong>
+            <p>Lectura de efectivo registrado contra margen disponible actual de {currency(snapshot.available_margin_now)}.</p>
+          </article>
+        </section>
+
+        <section className="month-close-preview-grid">
+          <div className="month-close-preview-column">
+            <article className="panel month-close-section-card">
+              <header className="panel-head">
+                <div className="panel-title-wrap"><span className="panel-orb" /><div><h2>Lectura estructural</h2><p>Senales numericas antes del cierre oficial.</p></div></div>
+              </header>
+              <div className="month-close-kpi-grid">
+                <article className="metric-card"><span className="metric-kicker">Ingreso reportado</span><strong>{currency(snapshot.income_reported)}</strong></article>
+                <article className="metric-card"><span className="metric-kicker">Base esperada</span><strong>{currency(snapshot.income_expected)}</strong></article>
+                <article className="metric-card"><span className="metric-kicker">Arrastre vencido</span><strong>{currency(snapshot.overdue_obligations_amount)}</strong></article>
+                <article className="metric-card"><span className="metric-kicker">Faltante ahorro base</span><strong>{currency(snapshot.goals_shortfall_amount)}</strong></article>
+              </div>
+              <div className="progress-stack month-close-progress-stack">
+                <div className="progress-card">
+                  <div className="progress-head"><strong>Ingreso completado</strong><span>{Math.round(incomeCompletionRatio * 100)}%</span></div>
+                  <div className="progress-bar"><div style={{ width: `${incomeCompletionRatio * 100}%` }} /></div>
+                  <small>{currency(snapshot.income_reported)} de {currency(snapshot.income_expected)}</small>
+                </div>
+                <div className="progress-card">
+                  <div className="progress-head"><strong>Cobertura de obligaciones</strong><span>{Math.round(obligationsCoverageRatio * 100)}%</span></div>
+                  <div className="progress-bar"><div style={{ width: `${obligationsCoverageRatio * 100}%` }} /></div>
+                  <small>{currency(snapshot.obligations_reserved)} de {currency(snapshot.obligations_target)}</small>
+                </div>
+                <div className="progress-card">
+                  <div className="progress-head"><strong>Buffer del siguiente ciclo</strong><span>{Math.round(nextCycleBufferRatio * 100)}%</span></div>
+                  <div className="progress-bar"><div style={{ width: `${nextCycleBufferRatio * 100}%` }} /></div>
+                  <small>{currency(snapshot.next_cycle_start_buffer)} sobre {currency(snapshot.next_cycle_obligations_amount + snapshot.goals_shortfall_amount)}</small>
+                </div>
+                <div className="progress-card">
+                  <div className="progress-head"><strong>Abono extra potencial</strong><span>{Math.round(extraDebtRatio * 100)}%</span></div>
+                  <div className="progress-bar"><div style={{ width: `${extraDebtRatio * 100}%` }} /></div>
+                  <small>{currency(snapshot.suggested_extra_debt_payment)} sobre {currency(snapshot.debt_total_balance)}</small>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div className="month-close-preview-column">
+            <article className="panel month-close-section-card">
+              <header className="panel-head">
+                <div className="panel-title-wrap"><span className="panel-orb" /><div><h2>Lectura ejecutiva</h2><p>Resumen orientado a decision.</p></div></div>
+              </header>
+              <div className="decision-grid month-close-decision-grid">
+                <article className="decision-card recommended">
+                  <span className="metric-kicker">Prioridad inmediata</span>
+                  <strong>{dashboard.recommended_free_margin_destination}</strong>
+                  <p>Es la mejor lectura operativa si convirtieras este preview en cierre oficial hoy.</p>
+                </article>
+                <article className="decision-card">
+                  <span className="metric-kicker">Personal remanente</span>
+                  <strong>{currency(snapshot.recommended_personal_remaining)}</strong>
+                  <p>Margen personal sugerido todavia no comprometido al corte.</p>
+                </article>
+              </div>
+              <div className="month-close-callouts">
+                <div>
+                  <span className="metric-kicker">Highlights</span>
+                  <div className="insight-grid month-close-insight-grid">
+                    {snapshot.highlights.map((item) => <article key={item} className="insight-card insight-positive"><p>{item}</p></article>)}
+                  </div>
+                </div>
+                <div>
+                  <span className="metric-kicker">Riesgos</span>
+                  <div className="insight-grid month-close-insight-grid">
+                    {snapshot.concerns.map((item) => <article key={item} className="insight-card insight-warning"><p>{item}</p></article>)}
+                  </div>
+                </div>
+                <div>
+                  <span className="metric-kicker">Siguiente jugada</span>
+                  <div className="insight-grid month-close-insight-grid">
+                    {snapshot.next_actions.map((item) => <article key={item} className="insight-card insight-calm"><p>{item}</p></article>)}
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+      </section>
+    </div>
   )
 }
 
@@ -2506,6 +2647,7 @@ function SettingsTab({
   onExport,
   onPreviewMonthClose,
   onGenerateMonthClose,
+  onDismissMonthClosePreview,
   onReset,
   resetCategoryForm,
   resetTagForm,
@@ -2543,6 +2685,7 @@ function SettingsTab({
   onExport: () => void
   onPreviewMonthClose: () => void
   onGenerateMonthClose: () => void
+  onDismissMonthClosePreview: () => void
   onReset: () => void
   resetCategoryForm: () => void
   resetTagForm: () => void
@@ -2723,21 +2866,7 @@ function SettingsTab({
             <button type="button" disabled={closingMonth || !canEditData} onClick={onGenerateMonthClose}>{closingMonth ? 'Generando cierre...' : 'Guardar cierre oficial'}</button>
           </div>
           <p>El preview no escribe nada. El cierre oficial guarda una foto del mes y no permite volver a generarla para este mismo periodo.</p>
-          {monthClosePreview ? (
-            <article className="list-card">
-              <div className="list-leading list-leading-top">
-                <VisualBadge iconToken="visibility" colorToken="sky" />
-                <div>
-                  <strong>Preview {monthClosePreview.period_month}/{monthClosePreview.period_year}</strong>
-                  <p>Liquidez {currency(monthClosePreview.cash_on_hand)} · margen actual {currency(monthClosePreview.available_margin_now)} · deuda activa {currency(monthClosePreview.debt_total_balance)}</p>
-                  <small>Arrastre vencido {currency(monthClosePreview.overdue_obligations_amount)} · buffer siguiente ciclo {currency(monthClosePreview.next_cycle_start_buffer)} · abono extra sugerido {currency(monthClosePreview.suggested_extra_debt_payment)}</small>
-                </div>
-              </div>
-              <div className="list-actions">
-                <span className="amount neutral">No guardado</span>
-              </div>
-            </article>
-          ) : null}
+          {monthClosePreview ? <div className="banner">Preview listo. Se abrio en un overlay y sigue sin guardarse hasta que confirmes.</div> : null}
           <div className="list-stack">
             {data.month_close_snapshots.map((snapshot) => (
               <article key={snapshot.id} className="list-card">
@@ -2758,6 +2887,7 @@ function SettingsTab({
           </div>
         </div>
       </Panel>
+      {monthClosePreview ? <MonthClosePreviewOverlay snapshot={monthClosePreview} dashboard={data.dashboard} onClose={onDismissMonthClosePreview} onCommit={onGenerateMonthClose} busy={closingMonth} /> : null}
       <HelpDock />
     </section>
   )
