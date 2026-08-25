@@ -1568,14 +1568,63 @@ function MonthClosePreviewOverlay({
     ? 0
     : Math.min(snapshot.next_cycle_start_buffer / (snapshot.next_cycle_obligations_amount + snapshot.goals_shortfall_amount), 1)
   const liquidityProtectionRatio = snapshot.structural_margin <= 0 ? 1 : Math.min(snapshot.cash_on_hand / snapshot.structural_margin, 1)
+  const debtDisciplineRatio = snapshot.debt_total_balance <= 0 || snapshot.suggested_extra_debt_payment > 0 ? 1 : 0.4
+  const overduePenaltyRatio = snapshot.overdue_obligations_amount <= 0 ? 1 : 0
+  const scoreBreakdown = [
+    {
+      label: 'Ingreso completado',
+      ratio: incomeCompletionRatio,
+      maxPoints: 24,
+      helper: `${currency(snapshot.income_reported)} de ${currency(snapshot.income_expected)}`,
+    },
+    {
+      label: 'Cobertura de obligaciones',
+      ratio: obligationsCoverageRatio,
+      maxPoints: 24,
+      helper: `${currency(snapshot.obligations_reserved)} de ${currency(snapshot.obligations_target)}`,
+    },
+    {
+      label: 'Buffer siguiente ciclo',
+      ratio: nextCycleBufferRatio,
+      maxPoints: 18,
+      helper: `${currency(snapshot.next_cycle_start_buffer)} sobre ${currency(snapshot.next_cycle_obligations_amount + snapshot.goals_shortfall_amount)}`,
+    },
+    {
+      label: 'Liquidez estructural',
+      ratio: liquidityProtectionRatio,
+      maxPoints: 16,
+      helper: `${currency(snapshot.cash_on_hand)} sobre base ${currency(snapshot.structural_margin)}`,
+    },
+    {
+      label: 'Disciplina con deuda',
+      ratio: debtDisciplineRatio,
+      maxPoints: 10,
+      helper: snapshot.debt_total_balance <= 0
+        ? 'Sin deuda activa que castigue el cierre.'
+        : snapshot.suggested_extra_debt_payment > 0
+          ? `Existe capacidad de abono extra por ${currency(snapshot.suggested_extra_debt_payment)}.`
+          : 'Todavia no hay holgura real para acelerar deuda.',
+    },
+    {
+      label: 'Vencidos controlados',
+      ratio: overduePenaltyRatio,
+      maxPoints: 8,
+      helper: snapshot.overdue_obligations_amount <= 0
+        ? 'No hay arrastre vencido al cierre.'
+        : `Persisten ${currency(snapshot.overdue_obligations_amount)} vencidos.`,
+    },
+  ].map((item) => ({
+    ...item,
+    earnedPoints: Math.round(item.ratio * item.maxPoints),
+  }))
   const healthScore = Math.max(0, Math.min(100,
     Math.round(
       (incomeCompletionRatio * 24)
       + (obligationsCoverageRatio * 24)
       + (nextCycleBufferRatio * 18)
       + (liquidityProtectionRatio * 16)
-      + ((snapshot.debt_total_balance <= 0 || snapshot.suggested_extra_debt_payment > 0) ? 10 : 4)
-      + (snapshot.overdue_obligations_amount <= 0 ? 8 : 0),
+      + (debtDisciplineRatio * 10)
+      + (overduePenaltyRatio * 8),
     ),
   ))
   const scoreTone = healthScore >= 80 ? 'positive' : healthScore >= 60 ? 'warning' : 'critical'
@@ -1686,6 +1735,18 @@ function MonthClosePreviewOverlay({
             </div>
             <p>{scoreNarrative}</p>
             <div className="progress-bar month-close-score-bar"><div style={{ width: `${healthScore}%` }} /></div>
+            <div className="month-close-score-breakdown">
+              {scoreBreakdown.map((item) => (
+                <article key={item.label} className="month-close-score-item">
+                  <div className="month-close-score-item-head">
+                    <strong>{item.label}</strong>
+                    <span>{item.earnedPoints}/{item.maxPoints} pts</span>
+                  </div>
+                  <div className="progress-bar month-close-score-item-bar"><div style={{ width: `${item.ratio * 100}%` }} /></div>
+                  <small>{item.helper}</small>
+                </article>
+              ))}
+            </div>
           </article>
           <article className="free-margin-card emphasis month-close-hero-card">
             <span className="metric-kicker">Carryover sugerido</span>
