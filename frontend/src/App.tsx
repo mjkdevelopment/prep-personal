@@ -1142,7 +1142,7 @@ function App() {
         </div>
         <div className="hero-card">
           <BrandLogo dark markOnly className="brand-mark brand-mark-on-dark" />
-          <span>Disponible personal</span>
+          <span>Disponible personal sugerido</span>
           <strong>{currency(data.dashboard.safe_personal_available)}</strong>
           <p>{currency(data.dashboard.income_reported_this_month)} reportados de {currency(data.dashboard.fixed_income_expected)} esperados.</p>
           <div className="action-row top-gap">
@@ -1464,7 +1464,7 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
         <Panel title="Grafico de gastos" subtitle="Distribucion mensual.">
           <ExpensePieChart comparisons={data.dashboard.expense_comparisons} />
         </Panel>
-        <Panel title="Buckets del mes" subtitle="Reservas vs objetivo.">
+        <Panel title="Buckets del mes" subtitle="Uso real vs presupuesto recomendado del mes.">
           <div className="progress-stack">
             {data.dashboard.bucket_overviews.map((bucket) => {
               const ratio = bucket.total === 0 ? 0 : Math.min(bucket.reserved / bucket.total, 1)
@@ -1517,7 +1517,7 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
             })}
           </div>
         </Panel>
-        <Panel title="Margen libre" subtitle="Excedente del mes.">
+        <Panel title="Margen libre" subtitle="Excedente estructural segun ingresos y base esperada.">
           <div className="free-margin-grid">
             <div className="free-margin-card">
               <span className="metric-kicker">Margen estructural</span>

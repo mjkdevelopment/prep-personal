@@ -437,6 +437,7 @@ def test_linked_transactions_update_current_period_progress() -> None:
 
     assert dashboard['current_month_expense_total'] == 500
     assert dashboard['personal_spent_this_month'] == 0
+    assert personal_bucket['total'] == 108
     assert dashboard['remaining_personal_recommended_this_month'] == 108
     assert personal_bucket['reserved'] == 0
     assert refreshed_payload['dashboard']['quincena_coverage'] == 0.625
