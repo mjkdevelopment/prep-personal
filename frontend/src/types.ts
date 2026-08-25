@@ -216,6 +216,10 @@ export interface DashboardSummary {
   income_reported_this_month: number
   free_margin_target: number
   free_margin_available_now: number
+  fixed_cost_ceiling: number
+  fixed_cost_progress_ratio: number
+  fixed_cost_headroom: number
+  fixed_cost_overflow: number
   current_month_expense_total: number
   previous_month_expense_total: number
   monthly_fixed_outflow_total: number
@@ -230,6 +234,14 @@ export interface DashboardSummary {
   recommended_free_margin_destination: string
   goals_target: number
   goals_reserved: number
+  capitalization_target: number
+  capitalization_gap: number
+  emergency_fund_target: number
+  emergency_fund_current: number
+  emergency_fund_gap: number
+  investable_surplus: number
+  investment_limit_amount: number
+  investment_unlocked: boolean
   personal_spent_this_month: number
   recommended_personal_budget_this_month: number
   remaining_personal_recommended_this_month: number

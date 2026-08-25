@@ -136,8 +136,8 @@ const helpSections: Array<{ title: string; items: string[] }> = [
   {
     title: 'Resumen',
     items: [
-      'Te da una lectura rapida del mes: gasto, cobertura y disponible sugerido.',
-      'Margen libre muestra el excedente del mes y Disponible hoy refleja solo lo ya ingresado.',
+      'Te da una lectura rapida del mes: gasto, cobertura, personal blindado y capitalizacion.',
+      'Capitalizacion resume el 20% minimo mas el sobrante del techo de fijos segun lo ya cobrado.',
       'El grafico destaca en que categorias se esta yendo tu dinero.',
       'Insights resume senales utiles para decidir con mas criterio.',
     ],
@@ -1219,9 +1219,9 @@ function App() {
         </div>
         <div className="hero-card">
           <BrandLogo dark markOnly className="brand-mark brand-mark-on-dark" />
-          <span>Disponible personal sugerido</span>
+          <span>Disponible personal blindado</span>
           <strong>{currency(data.dashboard.safe_personal_available)}</strong>
-          <p>{currency(data.dashboard.income_reported_this_month)} reportados de {currency(data.dashboard.fixed_income_expected)} esperados.</p>
+          <p>Es tu 30% disponible sobre {currency(data.dashboard.income_reported_this_month)} ya cobrados este mes.</p>
           <div className="action-row top-gap">
             <button type="button" className="ghost light" onClick={() => void handleLogout()}>Cerrar sesion</button>
           </div>
@@ -1782,7 +1782,7 @@ function MonthClosePreviewOverlay({
                 <article className="metric-card"><span className="metric-kicker">Ingreso reportado</span><strong>{currency(snapshot.income_reported)}</strong></article>
                 <article className="metric-card"><span className="metric-kicker">Base esperada</span><strong>{currency(snapshot.income_expected)}</strong></article>
                 <article className="metric-card"><span className="metric-kicker">Arrastre vencido</span><strong>{currency(snapshot.overdue_obligations_amount)}</strong></article>
-                <article className="metric-card"><span className="metric-kicker">Faltante ahorro base</span><strong>{currency(snapshot.goals_shortfall_amount)}</strong></article>
+                <article className="metric-card"><span className="metric-kicker">Faltante de capitalizacion</span><strong>{currency(snapshot.goals_shortfall_amount)}</strong></article>
               </div>
               <div className="progress-stack month-close-progress-stack">
                 <div className="progress-card">
@@ -1915,9 +1915,10 @@ function MonthClosePreviewOverlay({
 function DashboardTab({ data }: { data: BootstrapResponse }) {
   return (
     <>
+      {data.dashboard.fixed_cost_overflow > 0 ? <div className="banner error">Alerta fuerte: tus gastos fijos ya superan el 50% sano del ingreso cobrado por {currency(data.dashboard.fixed_cost_overflow)}. La prioridad ahora es recortar o renegociar.</div> : null}
       <section className="stats-grid stats-grid-4">
         <MetricCard label="Gasto del mes" value={currency(data.dashboard.current_month_expense_total)} />
-        <MetricCard label="Meta quincenal" value={currency(data.dashboard.reserve_per_quincena)} />
+        <MetricCard label="Techo fijo actual" value={currency(data.dashboard.fixed_cost_ceiling)} />
         <MetricCard label="Ingreso faltante" value={currency(data.dashboard.income_gap)} />
         <MetricCard label="Cobertura" value={`${Math.round(data.dashboard.quincena_coverage * 100)}%`} />
       </section>
@@ -1925,7 +1926,7 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
         <Panel title="Grafico de gastos" subtitle="Distribucion mensual.">
           <ExpensePieChart comparisons={data.dashboard.expense_comparisons} />
         </Panel>
-        <Panel title="Buckets del mes" subtitle="Uso real vs presupuesto recomendado del mes.">
+        <Panel title="Buckets del mes" subtitle="Uso real contra tu politica 50/30/20 sobre ingreso cobrado.">
           <div className="progress-stack">
             {data.dashboard.bucket_overviews.map((bucket) => {
               const ratio = bucket.total === 0 ? 0 : Math.min(bucket.reserved / bucket.total, 1)
@@ -1978,38 +1979,48 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
             })}
           </div>
         </Panel>
-        <Panel title="Margen libre" subtitle="Excedente estructural segun ingresos y base esperada.">
+        <Panel title="Capitalizacion" subtitle="20% minimo mas todo el sobrante del techo de fijos.">
           <div className="free-margin-grid">
             <div className="free-margin-card">
-              <span className="metric-kicker">Margen estructural</span>
+              <span className="metric-kicker">Meta estructural</span>
               <strong>{currency(data.dashboard.free_margin_target)}</strong>
             </div>
             <div className="free-margin-card emphasis">
-              <span className="metric-kicker">Disponible hoy</span>
+              <span className="metric-kicker">Meta con lo cobrado hoy</span>
               <strong>{currency(data.dashboard.free_margin_available_now)}</strong>
+            </div>
+            <div className="free-margin-card">
+              <span className="metric-kicker">Faltante por capitalizar</span>
+              <strong>{currency(data.dashboard.capitalization_gap)}</strong>
             </div>
             {data.dashboard.debt_total_balance > 0 ? (
               <div className="free-margin-card">
-                <span className="metric-kicker">Capacidad extra a deuda</span>
+                <span className="metric-kicker">Pendiente para deuda</span>
                 <strong>{currency(data.dashboard.debt_extra_payment_capacity)}</strong>
               </div>
             ) : null}
           </div>
         </Panel>
-        <Panel title="Decidir excedente" subtitle="Elige destino.">
+        <Panel title="Politica activa" subtitle="Prioridad automatica del excedente segun tu regla.">
           <div className="decision-grid">
             <article className="decision-card recommended">
               <span className="metric-kicker">Prioridad sugerida</span>
               <strong>{data.dashboard.recommended_free_margin_destination}</strong>
             </article>
             <article className="decision-card">
-              <strong>Pasar a ahorro o inversion</strong>
+              <span className="metric-kicker">Fijos reales</span>
+              <strong>{currency(data.dashboard.obligations_target)}</strong>
+              <p>Techo sano: {currency(data.dashboard.fixed_cost_ceiling)}. {data.dashboard.fixed_cost_overflow > 0 ? `Exceso actual ${currency(data.dashboard.fixed_cost_overflow)}.` : `Sobrante capitalizable ${currency(data.dashboard.fixed_cost_headroom)}.`}</p>
             </article>
             <article className="decision-card">
-              <strong>Abonar a deuda</strong>
+              <span className="metric-kicker">Fondo de seguridad</span>
+              <strong>{currency(data.dashboard.emergency_fund_current)}</strong>
+              <p>Meta sugerida: {currency(data.dashboard.emergency_fund_target)}. Faltan {currency(data.dashboard.emergency_fund_gap)}.</p>
             </article>
             <article className="decision-card">
-              <strong>Liberar a personal</strong>
+              <span className="metric-kicker">Inversion habilitada</span>
+              <strong>{data.dashboard.investment_unlocked ? currency(data.dashboard.investment_limit_amount) : 'No disponible'}</strong>
+              <p>{data.dashboard.investment_unlocked ? `Limite sano sobre excedente real: ${currency(data.dashboard.investment_limit_amount)}.` : 'Primero se sanea deuda o se completa el fondo de seguridad.'}</p>
             </article>
           </div>
         </Panel>

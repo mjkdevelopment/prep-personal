@@ -341,6 +341,9 @@ def test_create_debt_and_generate_month_close() -> None:
     assert len(payload['month_close_snapshots']) >= 1
     assert payload['dashboard']['debt_total_balance'] == 250000
     assert payload['dashboard']['debt_payment_target'] == 21000
+    assert payload['dashboard']['capitalization_target'] == 2400
+    assert payload['dashboard']['fixed_cost_ceiling'] == 6000
+    assert payload['dashboard']['recommended_free_margin_destination'] == 'Abonar deuda prioritaria'
     assert isinstance(payload['dashboard']['recommended_free_margin_destination'], str)
 
     duplicate_close = client.post('/api/month-close/current', headers=headers)
@@ -444,7 +447,7 @@ def test_dashboard_monthly_expected_converts_weekly_and_biweekly_amounts() -> No
     assert payload['dashboard']['fixed_income_expected'] == 54000
     assert payload['dashboard']['monthly_fixed_outflow_total'] == 20000
     assert payload['dashboard']['reserve_per_quincena'] == 10000
-    assert payload['dashboard']['free_margin_target'] == 7000
+    assert payload['dashboard']['free_margin_target'] == 17800
     assert payload['dashboard']['free_margin_available_now'] == 0
     assert payload['dashboard']['quincena_reserve_views'][1]['amount'] == 10000
     assert payload['dashboard']['quincena_reserve_views'][2]['amount'] == 10000
@@ -539,12 +542,14 @@ def test_linked_transactions_update_current_period_progress() -> None:
     assert obligation['current_period_status'] == 'Parcial'
 
     dashboard = refreshed_payload['dashboard']
-    personal_bucket = next(item for item in dashboard['bucket_overviews'] if item['label'] == 'Personal')
+    personal_bucket = next(item for item in dashboard['bucket_overviews'] if item['label'] == 'Personal blindado')
 
     assert dashboard['current_month_expense_total'] == 500
     assert dashboard['personal_spent_this_month'] == 0
-    assert personal_bucket['total'] == 108
-    assert dashboard['remaining_personal_recommended_this_month'] == 108
+    assert dashboard['fixed_cost_overflow'] == 500
+    assert personal_bucket['total'] == 180
+    assert dashboard['remaining_personal_recommended_this_month'] == 180
+    assert dashboard['capitalization_target'] == 120
     assert personal_bucket['reserved'] == 0
     assert refreshed_payload['dashboard']['quincena_coverage'] == 0.625
     banco_wallet = next(item for item in dashboard['wallet_balances'] if item['label'] == 'Banco')
@@ -796,7 +801,7 @@ def test_credit_card_statement_payment_splits_fixed_and_personal() -> None:
     refreshed_internet = next(item for item in refreshed['obligations'] if item['label'] == 'Internet')
     refreshed_luz = next(item for item in refreshed['obligations'] if item['label'] == 'Luz')
     statement_view = next(item for item in refreshed['credit_card_statements'] if item['id'] == statement_id)
-    personal_bucket = next(item for item in refreshed['dashboard']['bucket_overviews'] if item['label'] == 'Personal')
+    personal_bucket = next(item for item in refreshed['dashboard']['bucket_overviews'] if item['label'] == 'Personal blindado')
 
     assert refreshed_internet['current_period_recorded_amount'] == 1800
     assert refreshed_luz['current_period_recorded_amount'] == 1200

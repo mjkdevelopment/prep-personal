@@ -315,6 +315,10 @@ class DashboardSummary(BaseModel):
     income_reported_this_month: float
     free_margin_target: float
     free_margin_available_now: float
+    fixed_cost_ceiling: float
+    fixed_cost_progress_ratio: float
+    fixed_cost_headroom: float
+    fixed_cost_overflow: float
     current_month_expense_total: float
     previous_month_expense_total: float
     monthly_fixed_outflow_total: float
@@ -329,6 +333,14 @@ class DashboardSummary(BaseModel):
     recommended_free_margin_destination: str
     goals_target: float
     goals_reserved: float
+    capitalization_target: float
+    capitalization_gap: float
+    emergency_fund_target: float
+    emergency_fund_current: float
+    emergency_fund_gap: float
+    investable_surplus: float
+    investment_limit_amount: float
+    investment_unlocked: bool
     personal_spent_this_month: float
     recommended_personal_budget_this_month: float
     remaining_personal_recommended_this_month: float
