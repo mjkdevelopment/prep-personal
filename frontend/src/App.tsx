@@ -27,6 +27,7 @@ import {
   fetchOwnerPanel,
   generateCurrentMonthClose,
   importFlutterDatabase,
+  previewCurrentMonthClose,
   exportCurrentDatabase,
   login,
   loginOwner,
@@ -571,6 +572,7 @@ function App() {
   const [importing, setImporting] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [closingMonth, setClosingMonth] = useState(false)
+  const [monthClosePreview, setMonthClosePreview] = useState<MonthCloseSnapshot | null>(null)
   const [importResult, setImportResult] = useState<FlutterImportSummary | null>(null)
 
   useEffect(() => {
@@ -644,6 +646,7 @@ function App() {
 
     const next = await fetchBootstrap()
     setData(next)
+    setMonthClosePreview(null)
     setOwnerData(null)
     setSelectedTheme(next.theme_id)
     setError(null)
@@ -1039,11 +1042,29 @@ function App() {
   const handleGenerateMonthClose = async () => {
     setClosingMonth(true)
     try {
+      const confirmed = window.confirm('Este boton guarda el cierre oficial del mes actual y luego ya no permitira regenerarlo.\n\n¿Deseas continuar?')
+      if (!confirmed) {
+        return
+      }
       const snapshot = await generateCurrentMonthClose() as MonthCloseSnapshot
+      setMonthClosePreview(null)
       await load()
       window.alert(`Cierre ${snapshot.period_month}/${snapshot.period_year} generado. Margen disponible: ${currency(snapshot.available_margin_now)}.`)
     } catch (closeError) {
       setError(resolveErrorMessage(closeError, 'No se pudo generar el cierre mensual.'))
+    } finally {
+      setClosingMonth(false)
+    }
+  }
+
+  const handlePreviewMonthClose = async () => {
+    setClosingMonth(true)
+    try {
+      const snapshot = await previewCurrentMonthClose()
+      setMonthClosePreview(snapshot)
+      setError(null)
+    } catch (closeError) {
+      setError(resolveErrorMessage(closeError, 'No se pudo generar el preview del cierre mensual.'))
     } finally {
       setClosingMonth(false)
     }
@@ -1373,6 +1394,7 @@ function App() {
           importing={importing}
           exporting={exporting}
           closingMonth={closingMonth}
+          monthClosePreview={monthClosePreview}
           selectedTheme={selectedTheme}
           onThemeSelect={async (themeId) => {
             setSelectedTheme(themeId)
@@ -1435,6 +1457,7 @@ function App() {
           onImportFileChange={setImportFile}
           onImport={() => void handleImport()}
           onExport={() => void handleExport()}
+          onPreviewMonthClose={() => void handlePreviewMonthClose()}
           onGenerateMonthClose={() => void handleGenerateMonthClose()}
           onReset={() => void handleReset()}
           resetCategoryForm={() => {
@@ -2456,6 +2479,7 @@ function SettingsTab({
   importing,
   exporting,
   closingMonth,
+  monthClosePreview,
   selectedTheme,
   onThemeSelect,
   passwordForm,
@@ -2480,6 +2504,7 @@ function SettingsTab({
   onImportFileChange,
   onImport,
   onExport,
+  onPreviewMonthClose,
   onGenerateMonthClose,
   onReset,
   resetCategoryForm,
@@ -2491,6 +2516,7 @@ function SettingsTab({
   importing: boolean
   exporting: boolean
   closingMonth: boolean
+  monthClosePreview: MonthCloseSnapshot | null
   selectedTheme: string
   onThemeSelect: (themeId: string) => Promise<void>
   passwordForm: { currentPassword: string; newPassword: string }
@@ -2515,6 +2541,7 @@ function SettingsTab({
   onImportFileChange: (file: File | null) => void
   onImport: () => void
   onExport: () => void
+  onPreviewMonthClose: () => void
   onGenerateMonthClose: () => void
   onReset: () => void
   resetCategoryForm: () => void
@@ -2692,9 +2719,25 @@ function SettingsTab({
         <div className="column-stack">
           {!canEditData ? <p className="read-only-note">Solo lectura para esta cuenta.</p> : null}
           <div className="action-row">
-            <button type="button" disabled={closingMonth || !canEditData} onClick={onGenerateMonthClose}>{closingMonth ? 'Generando cierre...' : 'Generar cierre actual'}</button>
+            <button type="button" className="ghost" disabled={closingMonth || !canEditData} onClick={onPreviewMonthClose}>{closingMonth ? 'Probando...' : 'Probar cierre sin guardar'}</button>
+            <button type="button" disabled={closingMonth || !canEditData} onClick={onGenerateMonthClose}>{closingMonth ? 'Generando cierre...' : 'Guardar cierre oficial'}</button>
           </div>
-          <p>Guarda una foto del mes con ingresos, obligaciones, liquidez, deuda y sugerencias de arrastre o abono extra.</p>
+          <p>El preview no escribe nada. El cierre oficial guarda una foto del mes y no permite volver a generarla para este mismo periodo.</p>
+          {monthClosePreview ? (
+            <article className="list-card">
+              <div className="list-leading list-leading-top">
+                <VisualBadge iconToken="visibility" colorToken="sky" />
+                <div>
+                  <strong>Preview {monthClosePreview.period_month}/{monthClosePreview.period_year}</strong>
+                  <p>Liquidez {currency(monthClosePreview.cash_on_hand)} · margen actual {currency(monthClosePreview.available_margin_now)} · deuda activa {currency(monthClosePreview.debt_total_balance)}</p>
+                  <small>Arrastre vencido {currency(monthClosePreview.overdue_obligations_amount)} · buffer siguiente ciclo {currency(monthClosePreview.next_cycle_start_buffer)} · abono extra sugerido {currency(monthClosePreview.suggested_extra_debt_payment)}</small>
+                </div>
+              </div>
+              <div className="list-actions">
+                <span className="amount neutral">No guardado</span>
+              </div>
+            </article>
+          ) : null}
           <div className="list-stack">
             {data.month_close_snapshots.map((snapshot) => (
               <article key={snapshot.id} className="list-card">

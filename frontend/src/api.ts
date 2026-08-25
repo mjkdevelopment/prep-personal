@@ -144,6 +144,7 @@ export const deleteCreditCardStatement = (id: number) => request(`/credit-card-s
 export const createDebt = (payload: DebtInput) => request('/debts', { method: 'POST', body: JSON.stringify(payload) })
 export const updateDebt = (id: number, payload: DebtInput) => request(`/debts/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
 export const deleteDebt = (id: number) => request(`/debts/${id}`, { method: 'DELETE' })
+export const previewCurrentMonthClose = () => request<MonthCloseSnapshot>('/month-close/current/preview', { method: 'POST' })
 export const generateCurrentMonthClose = () => request<MonthCloseSnapshot>('/month-close/current', { method: 'POST' })
 export const completeInitialSetup = (payload: InitialSetupPayload) => request<BootstrapResponse>('/setup/complete', { method: 'POST', body: JSON.stringify(payload) })
 export const resetInitialSetup = () => request<void>('/setup/reset', { method: 'POST' })

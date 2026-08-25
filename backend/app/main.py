@@ -387,10 +387,20 @@ def list_month_close_snapshots(user: UserRecord = Depends(require_app_user)):
     return database.list_month_close_snapshots(user.id)
 
 
+@app.post('/api/month-close/current/preview', response_model=MonthCloseSnapshot)
+def preview_current_month_close(user: UserRecord = Depends(require_editor)):
+    fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, _, transactions, categories, _ = current_state(user.id)
+    payload = build_month_close_snapshot(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories)
+    return MonthCloseSnapshot(id=0, is_preview=True, **payload)
+
+
 @app.post('/api/month-close/current', response_model=MonthCloseSnapshot)
 def generate_current_month_close(user: UserRecord = Depends(require_editor)):
     fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, _, transactions, categories, _ = current_state(user.id)
     payload = build_month_close_snapshot(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories)
+    existing_snapshot = database.get_month_close_snapshot(user.id, payload['period_year'], payload['period_month'])
+    if existing_snapshot is not None:
+        raise HTTPException(status_code=409, detail='Ya existe un cierre oficial para este mes. Usa el preview para probar o espera al siguiente periodo.')
     snapshot = database.upsert_month_close_snapshot(user.id, payload)
     database.record_audit(user, 'generate_month_close', 'month_close', f'{snapshot.period_year}-{snapshot.period_month:02d}', f'Cierre generado con margen disponible {snapshot.available_margin_now:.2f}.')
     return snapshot

@@ -241,6 +241,7 @@ class Debt(DebtBase):
 
 class MonthCloseSnapshot(BaseModel):
     id: int
+    is_preview: bool = False
     period_year: int
     period_month: int
     closed_at_iso: str

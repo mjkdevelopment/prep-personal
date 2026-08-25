@@ -313,9 +313,18 @@ def test_create_debt_and_generate_month_close() -> None:
     )
     assert income_response.status_code == 200
 
+    preview_response = client.post('/api/month-close/current/preview', headers=headers)
+    assert preview_response.status_code == 200
+    preview_snapshot = preview_response.json()
+    assert preview_snapshot['is_preview'] is True
+
+    before_official = client.get('/api/bootstrap', headers=headers).json()
+    assert before_official['month_close_snapshots'] == []
+
     close_response = client.post('/api/month-close/current', headers=headers)
     assert close_response.status_code == 200
     snapshot = close_response.json()
+    assert snapshot['is_preview'] is False
     assert snapshot['period_month'] >= 1
     assert snapshot['debt_payment_target'] == 21000
     assert snapshot['debt_total_balance'] == 250000
@@ -333,6 +342,10 @@ def test_create_debt_and_generate_month_close() -> None:
     assert payload['dashboard']['debt_total_balance'] == 250000
     assert payload['dashboard']['debt_payment_target'] == 21000
     assert isinstance(payload['dashboard']['recommended_free_margin_destination'], str)
+
+    duplicate_close = client.post('/api/month-close/current', headers=headers)
+    assert duplicate_close.status_code == 409
+    assert 'Ya existe un cierre oficial para este mes' in duplicate_close.json()['detail']
 
 
 def test_complete_and_reset_setup_flow() -> None:

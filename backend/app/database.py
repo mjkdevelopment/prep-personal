@@ -484,6 +484,11 @@ class Database:
             rows = connection.execute('SELECT * FROM month_close_snapshots WHERE user_id = ? ORDER BY period_year DESC, period_month DESC, id DESC', (user_id,)).fetchall()
         return [self._month_close_snapshot(row) for row in rows]
 
+    def get_month_close_snapshot(self, user_id: int, period_year: int, period_month: int) -> MonthCloseSnapshot | None:
+        with self.connect() as connection:
+            row = connection.execute('SELECT * FROM month_close_snapshots WHERE user_id = ? AND period_year = ? AND period_month = ? LIMIT 1', (user_id, period_year, period_month)).fetchone()
+        return None if row is None else self._month_close_snapshot(row)
+
     def upsert_month_close_snapshot(self, user_id: int, payload: dict) -> MonthCloseSnapshot:
         with self.connect() as connection:
             connection.execute(
@@ -963,6 +968,7 @@ class Database:
     def _month_close_snapshot(row: sqlite3.Row) -> MonthCloseSnapshot:
         return MonthCloseSnapshot(
             id=row['id'],
+            is_preview=False,
             period_year=int(row['period_year']),
             period_month=int(row['period_month']),
             closed_at_iso=str(row['closed_at_iso']),

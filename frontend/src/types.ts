@@ -101,6 +101,7 @@ export interface Debt {
 
 export interface MonthCloseSnapshot {
   id: number
+  is_preview: boolean
   period_year: number
   period_month: number
   closed_at_iso: string
