@@ -242,6 +242,99 @@ def test_export_current_user_backup_is_forbidden_for_other_users() -> None:
     assert 'solo esta habilitado para la cuenta mjk' in response.json()['detail']
 
 
+def test_create_debt_and_generate_month_close() -> None:
+    headers = ensure_app_headers('debtclose', '1234')
+    setup = client.post(
+        '/api/setup/complete',
+        json={
+            'fixed_income_sources': [
+                {
+                    'label': 'Nomina base',
+                    'amount': 12000,
+                    'cadence': 'monthly',
+                    'expected_day': 30,
+                    'expected_weekday': None,
+                    'wallet': 'Banco',
+                    'active': True,
+                }
+            ],
+            'obligations': [
+                {
+                    'label': 'Casa',
+                    'amount': 3000,
+                    'category_id': 'casa',
+                    'credit_card_id': None,
+                    'cadence': 'monthly',
+                    'due_day': 15,
+                    'due_weekday': None,
+                    'kind': 'Fija',
+                    'status': 'Pendiente',
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert setup.status_code == 200
+
+    debt_response = client.post(
+        '/api/debts',
+        json={
+            'label': 'Prestamo vehiculo',
+            'lender': 'Banco prueba',
+            'balance_amount': 250000,
+            'monthly_payment_amount': 21000,
+            'currency': 'DOP',
+            'payment_day': 18,
+            'allow_extra_payment': True,
+            'active': True,
+            'notes': 'Sin penalidad',
+        },
+        headers=headers,
+    )
+    assert debt_response.status_code == 200
+    assert debt_response.json()['label'] == 'Prestamo vehiculo'
+
+    income_response = client.post(
+        '/api/transactions',
+        json={
+            'kind': 'ingreso',
+            'amount': 12000,
+            'wallet': 'Banco',
+            'category': 'Nomina',
+            'fixed_income_source_id': None,
+            'obligation_id': None,
+            'credit_card_statement_id': None,
+            'tags': [],
+            'notes': '',
+            'date': '2026-08-01T08:00:00',
+            'recurring': False,
+        },
+        headers=headers,
+    )
+    assert income_response.status_code == 200
+
+    close_response = client.post('/api/month-close/current', headers=headers)
+    assert close_response.status_code == 200
+    snapshot = close_response.json()
+    assert snapshot['period_month'] >= 1
+    assert snapshot['debt_payment_target'] == 21000
+    assert snapshot['debt_total_balance'] == 250000
+    assert snapshot['overdue_obligations_amount'] >= 0
+    assert snapshot['next_cycle_start_buffer'] >= 0
+    assert snapshot['goals_shortfall_amount'] >= 0
+    assert isinstance(snapshot['highlights'], list)
+    assert isinstance(snapshot['next_actions'], list)
+
+    bootstrap = client.get('/api/bootstrap', headers=headers)
+    assert bootstrap.status_code == 200
+    payload = bootstrap.json()
+    assert len(payload['debts']) == 1
+    assert len(payload['month_close_snapshots']) >= 1
+    assert payload['dashboard']['debt_total_balance'] == 250000
+    assert payload['dashboard']['debt_payment_target'] == 21000
+    assert isinstance(payload['dashboard']['recommended_free_margin_destination'], str)
+
+
 def test_complete_and_reset_setup_flow() -> None:
     headers = ensure_app_headers('setupuser', '1234')
     response = client.post(

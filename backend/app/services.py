@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .defaults import DEFAULT_WALLETS
-from .schemas import AllocationSuggestion, BootstrapResponse, BucketOverview, CategoryConfig, CategorySpendComparison, CreditCard, CreditCardAlert, CreditCardStatement, DashboardSummary, FixedIncomeSource, InsightView, Obligation, QuincenaReserveView, TagConfig, Transaction, UserRole, WalletBalanceView
+from .schemas import AllocationSuggestion, BootstrapResponse, BucketOverview, CategoryConfig, CategorySpendComparison, CreditCard, CreditCardAlert, CreditCardStatement, DashboardSummary, Debt, FixedIncomeSource, InsightView, MonthCloseSnapshot, Obligation, QuincenaReserveView, TagConfig, Transaction, UserRole, WalletBalanceView
 
 
 @dataclass
@@ -12,6 +12,10 @@ class FinancialSnapshot:
     fixed_income_expected: float
     income_reported: float
     pending_obligations: float
+    overdue_obligations: float = 0
+    debt_payment_target: float = 0
+    debt_total_balance: float = 0
+    has_extra_payment_debt: bool = False
 
 
 def _round(value: float) -> float:
@@ -104,29 +108,43 @@ def suggest_income_allocation(amount: float, snapshot: FinancialSnapshot) -> All
         return AllocationSuggestion(for_obligations=0, for_goals=0, for_personal=0, rationale='Introduce un monto valido para generar una recomendacion.')
 
     income_gap = max(snapshot.fixed_income_expected - snapshot.income_reported, 0)
-    needs_pressure = snapshot.pending_obligations > 0 or income_gap > 0
+    needs_pressure = snapshot.pending_obligations > 0 or snapshot.overdue_obligations > 0 or income_gap > 0
     personal_ratio = 0.18 if needs_pressure else 0.30
-    goals_ratio = 0.24 if snapshot.income_reported >= snapshot.fixed_income_expected else 0.16
-    obligations_allocation = min(_round(amount * 0.55 if amount < snapshot.pending_obligations else snapshot.pending_obligations), amount)
+    debt_pressure = snapshot.debt_total_balance > 0 and snapshot.has_extra_payment_debt and snapshot.pending_obligations <= 0 and snapshot.overdue_obligations <= 0 and income_gap <= 0
+    goals_ratio = 0.22 if debt_pressure else 0.24 if snapshot.income_reported >= snapshot.fixed_income_expected else 0.16
+    obligations_need = max(snapshot.pending_obligations, snapshot.overdue_obligations)
+    obligations_allocation = min(_round(amount * 0.55 if amount < obligations_need else obligations_need), amount)
     after_obligations = amount - obligations_allocation
     goals_allocation = min(_round(after_obligations * goals_ratio), after_obligations)
     after_goals = after_obligations - goals_allocation
     personal_allocation = min(_round(after_goals if after_goals < amount * personal_ratio else amount * personal_ratio), after_goals)
     leftover = amount - obligations_allocation - goals_allocation - personal_allocation
     adjusted_goals = _round(goals_allocation + leftover)
-    rationale = 'Este ingreso debe proteger primero obligaciones y el minimo esperado del mes antes de liberar gasto personal.' if needs_pressure else 'Tus compromisos base estan mas cubiertos; puedes liberar una mayor parte a uso personal sin romper la quincena.'
+    if snapshot.overdue_obligations > 0:
+        rationale = 'Este ingreso debe ponerse primero al dia con atrasos antes de abrir gasto personal o abonos extra.'
+    elif needs_pressure:
+        rationale = 'Este ingreso debe proteger primero obligaciones y el minimo esperado del mes antes de liberar gasto personal.'
+    elif debt_pressure:
+        rationale = 'La estructura base ya esta cubierta; lo razonable es sostener ahorro y usar el excedente para acelerar deuda.'
+    else:
+        rationale = 'Tus compromisos base estan mas cubiertos; puedes liberar una mayor parte a uso personal sin romper la quincena.'
     return AllocationSuggestion(for_obligations=_round(obligations_allocation), for_goals=adjusted_goals, for_personal=_round(personal_allocation), rationale=rationale)
 
 
-def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], transactions: list[Transaction], categories: list[CategoryConfig]) -> DashboardSummary:
+def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], debts: list[Debt], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], transactions: list[Transaction], categories: list[CategoryConfig]) -> DashboardSummary:
     now = datetime.now()
     del credit_cards
     transactions_by_id = {item.id: item for item in transactions}
     fixed_income_expected = sum(_monthly_expected_amount(item.amount, item.cadence) for item in fixed_income_sources if item.active)
     income_reported_this_month = sum(item.amount for item in transactions if _is_income(item.kind) and item.date.year == now.year and item.date.month == now.month)
     pending_obligations_total = sum(item.current_period_balance for item in obligations)
+    overdue_obligations_total = sum(item.current_period_balance for item in obligations if item.current_period_balance > 0 and item.cadence == 'monthly' and item.due_day < now.day)
     obligations_target = sum(item.current_period_expected_amount for item in obligations)
     obligations_reserved = sum(item.current_period_recorded_amount for item in obligations)
+    active_debts = [item for item in debts if item.active]
+    debt_payment_target = sum(item.monthly_payment_amount for item in active_debts)
+    debt_total_balance = sum(item.balance_amount for item in active_debts)
+    has_extra_payment_debt = any(item.allow_extra_payment and item.balance_amount > 0 for item in active_debts)
     goals_target = fixed_income_expected * 0.20
     goals_reserved = sum(item.amount for item in transactions if item.kind in {'ahorro', 'inversion', 'deuda'})
     personal_target = fixed_income_expected * 0.30
@@ -134,7 +152,8 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     direct_personal_spent = sum(item.amount for item in transactions if item.kind == 'gasto' and item.obligation_id is None and item.credit_card_statement_id is None and item.date.year == now.year and item.date.month == now.month)
     personal_spent_this_month = direct_personal_spent + sum(amount for transaction_id, amount in personal_from_card_payments.items() if (transactions_by_id.get(transaction_id) and transactions_by_id[transaction_id].date.year == now.year and transactions_by_id[transaction_id].date.month == now.month))
     total_expenses_this_month = sum(item.amount for item in transactions if _affects_cash_negatively(item.kind) and item.date.year == now.year and item.date.month == now.month)
-    snapshot = FinancialSnapshot(fixed_income_expected=fixed_income_expected, income_reported=income_reported_this_month, pending_obligations=pending_obligations_total)
+    debt_extra_payment_capacity = max(income_reported_this_month - obligations_target - goals_target - personal_target, 0) if has_extra_payment_debt else 0
+    snapshot = FinancialSnapshot(fixed_income_expected=fixed_income_expected, income_reported=income_reported_this_month, pending_obligations=pending_obligations_total, overdue_obligations=overdue_obligations_total, debt_payment_target=debt_payment_target, debt_total_balance=debt_total_balance, has_extra_payment_debt=has_extra_payment_debt)
     latest_income_amount = next((item.amount for item in transactions if _is_income(item.kind)), 0)
     latest_income_suggestion = suggest_income_allocation(latest_income_amount, snapshot)
     recommended_personal_budget_this_month = suggest_income_allocation(income_reported_this_month, snapshot).for_personal
@@ -179,15 +198,31 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     insights = []
     credit_card_alerts = _credit_card_alerts(credit_card_statements)
     delivery_expenses = sum(item.amount for item in transactions if item.category == 'Delivery')
+    if overdue_obligations_total > 0:
+        insights.append(InsightView(title='Arrastre pendiente al cierre actual', body=f'Hay {_round(overdue_obligations_total):.0f} vencidos del mes en curso. Antes de hablar de excedente, conviene normalizar ese arrastre.'))
     if delivery_expenses > 2500:
         insights.append(InsightView(title='Delivery por encima de tendencia', body='Tus gastos en delivery ya superan el umbral mensual esperado. Conviene recortar antes de abrir mas presupuesto personal.'))
     if income_reported_this_month >= fixed_income_expected:
-        insights.append(InsightView(title='Capacidad de ahorro al alza', body='Ya alcanzaste o superaste el minimo esperado del mes; puedes desviar una mayor parte del siguiente ingreso a ahorro o inversion.'))
+        if debt_total_balance > 0 and has_extra_payment_debt:
+            insights.append(InsightView(title='Excedente con destino deuda', body='Ya alcanzaste la base esperada del mes. El siguiente excedente puede acelerar deuda sin desproteger la estructura.'))
+        else:
+            insights.append(InsightView(title='Capacidad de ahorro al alza', body='Ya alcanzaste o superaste el minimo esperado del mes; puedes desviar una mayor parte del siguiente ingreso a ahorro o inversion.'))
     else:
         insights.append(InsightView(title='Ingreso base aun incompleto', body=f'Todavia faltan {_round(income_gap):.0f} para llegar al ingreso fijo esperado. El motor debe ser conservador con gasto personal.'))
     insights.append(InsightView(title='Disponible personal real', body=f'Con los ingresos ya registrados, te quedan {_round(remaining_personal_recommended_this_month):.0f} dentro de la recomendacion personal del mes.'))
     if credit_card_alerts:
         insights.append(InsightView(title='Tarjetas con fecha cercana', body=f'Tienes {len(credit_card_alerts)} estado(s) de cuenta que requieren seguimiento esta semana.'))
+
+    if overdue_obligations_total > 0:
+        recommended_free_margin_destination = 'Cubrir arrastre vencido'
+    elif debt_total_balance > 0 and has_extra_payment_debt and debt_extra_payment_capacity > 0:
+        recommended_free_margin_destination = 'Abonar extra a deuda'
+    elif goals_reserved < goals_target:
+        recommended_free_margin_destination = 'Aumentar ahorro, inversion o deuda'
+    elif pending_obligations_total > 0:
+        recommended_free_margin_destination = 'Cerrar obligaciones pendientes'
+    else:
+        recommended_free_margin_destination = 'Liberar una parte a uso personal'
 
     return DashboardSummary(
         safe_personal_available=_round(remaining_personal_recommended_this_month),
@@ -202,6 +237,11 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
         pending_obligations_total=_round(pending_obligations_total),
         obligations_target=_round(obligations_target),
         obligations_reserved=_round(obligations_reserved),
+        overdue_obligations_total=_round(overdue_obligations_total),
+        debt_payment_target=_round(debt_payment_target),
+        debt_total_balance=_round(debt_total_balance),
+        debt_extra_payment_capacity=_round(debt_extra_payment_capacity),
+        recommended_free_margin_destination=recommended_free_margin_destination,
         goals_target=_round(goals_target),
         goals_reserved=_round(goals_reserved),
         personal_spent_this_month=_round(personal_spent_this_month),
@@ -228,5 +268,93 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     )
 
 
-def build_bootstrap(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], transactions: list[Transaction], categories: list[CategoryConfig], tags: list[TagConfig]) -> BootstrapResponse:
-    return BootstrapResponse(setup_complete=False, theme_id='emerald_editorial', current_username='', current_user_role=UserRole.operator, can_manage_users=False, can_edit_data=True, users=[], audit_events=[], fixed_income_sources=fixed_income_sources, obligations=obligations, credit_cards=credit_cards, credit_card_statements=credit_card_statements, transactions=transactions, categories=categories, tags=tags, wallets=DEFAULT_WALLETS, dashboard=build_dashboard(fixed_income_sources, obligations, credit_cards, credit_card_statements, transactions, categories))
+def build_month_close_snapshot(
+    fixed_income_sources: list[FixedIncomeSource],
+    obligations: list[Obligation],
+    debts: list[Debt],
+    credit_cards: list[CreditCard],
+    credit_card_statements: list[CreditCardStatement],
+    transactions: list[Transaction],
+    categories: list[CategoryConfig],
+) -> dict:
+    dashboard = build_dashboard(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories)
+    active_debts = [item for item in debts if item.active]
+    debt_payment_target = _round(sum(item.monthly_payment_amount for item in active_debts))
+    debt_total_balance = _round(sum(item.balance_amount for item in active_debts))
+    cash_on_hand = _round(sum(item.amount for item in dashboard.wallet_balances))
+    income_delta = _round(dashboard.income_reported_this_month - dashboard.fixed_income_expected)
+    income_delta_percent = 0.0 if dashboard.fixed_income_expected <= 0 else _round((income_delta / dashboard.fixed_income_expected) * 100)
+    goals_shortfall = max(dashboard.goals_target - dashboard.goals_reserved, 0)
+    overdue_obligations_amount = dashboard.overdue_obligations_total
+    next_cycle_obligations_amount = max(dashboard.pending_obligations_total - overdue_obligations_amount, 0)
+    next_cycle_start_buffer = _round(min(max(dashboard.free_margin_available_now - overdue_obligations_amount, 0), next_cycle_obligations_amount + goals_shortfall))
+    available_after_buffer = max(dashboard.free_margin_available_now - overdue_obligations_amount - next_cycle_start_buffer, 0)
+    suggested_extra_debt_payment = _round(min(available_after_buffer, debt_total_balance)) if any(item.allow_extra_payment for item in active_debts) else 0
+    suggested_carryover_amount = _round(overdue_obligations_amount + next_cycle_start_buffer)
+
+    highlights: list[str] = []
+    concerns: list[str] = []
+    next_actions: list[str] = []
+
+    if income_delta >= 0:
+        highlights.append(f'El mes cerro con ingresos por encima de la base en {_round(income_delta):.0f}.')
+    else:
+        concerns.append(f'El ingreso reportado quedo {_round(abs(income_delta)):.0f} por debajo de la base esperada.')
+
+    if overdue_obligations_amount > 0:
+        concerns.append(f'Quedan {_round(overdue_obligations_amount):.0f} vencidos que deben arrastrarse como prioridad al nuevo ciclo.')
+        next_actions.append('Liquida primero el arrastre vencido antes de liberar nuevos gastos variables.')
+    elif next_cycle_obligations_amount > 0:
+        concerns.append(f'Quedan {_round(next_cycle_obligations_amount):.0f} pendientes del ciclo que conviene reservar como arranque del proximo mes.')
+        next_actions.append('Separa desde ya el fondo de arranque del siguiente mes antes de decidir excedentes.')
+    else:
+        highlights.append('Las obligaciones del periodo quedaron cubiertas en el cierre actual.')
+
+    if suggested_extra_debt_payment > 0 and debt_total_balance > 0:
+        highlights.append(f'Hay espacio para abonar {_round(suggested_extra_debt_payment):.0f} extra a deuda sin romper la estructura base.')
+        next_actions.append('Evalua dirigir el excedente libre a la deuda mas costosa o mas estrategica.')
+
+    if next_cycle_start_buffer > 0:
+        highlights.append(f'Conviene arrancar el proximo ciclo con {_round(next_cycle_start_buffer):.0f} ya reservado entre pendientes y ahorro base.')
+
+    if dashboard.remaining_personal_recommended_this_month <= 0:
+        concerns.append('El presupuesto personal sugerido ya se consumio por completo en este ciclo.')
+        next_actions.append('Arranca el nuevo mes con un tope personal mas vigilado hasta completar los ingresos base.')
+    else:
+        highlights.append(f'Quedaron {_round(dashboard.remaining_personal_recommended_this_month):.0f} dentro del presupuesto personal sugerido.')
+
+    if not next_actions:
+        next_actions.append('Mantiene el mismo criterio de asignacion para el siguiente ingreso y revisa el cierre al final del proximo ciclo.')
+
+    now = datetime.now()
+    return {
+        'period_year': now.year,
+        'period_month': now.month,
+        'closed_at_iso': now.isoformat(),
+        'income_expected': dashboard.fixed_income_expected,
+        'income_reported': dashboard.income_reported_this_month,
+        'income_delta': income_delta,
+        'income_delta_percent': income_delta_percent,
+        'obligations_target': dashboard.obligations_target,
+        'obligations_reserved': dashboard.obligations_reserved,
+        'pending_obligations': dashboard.pending_obligations_total,
+        'cash_on_hand': cash_on_hand,
+        'structural_margin': dashboard.free_margin_target,
+        'available_margin_now': dashboard.free_margin_available_now,
+        'recommended_personal_remaining': dashboard.remaining_personal_recommended_this_month,
+        'overdue_obligations_amount': overdue_obligations_amount,
+        'next_cycle_obligations_amount': _round(next_cycle_obligations_amount),
+        'next_cycle_start_buffer': next_cycle_start_buffer,
+        'goals_shortfall_amount': _round(goals_shortfall),
+        'debt_payment_target': debt_payment_target,
+        'debt_total_balance': debt_total_balance,
+        'suggested_carryover_amount': suggested_carryover_amount,
+        'suggested_extra_debt_payment': suggested_extra_debt_payment,
+        'highlights': highlights,
+        'concerns': concerns,
+        'next_actions': next_actions,
+    }
+
+
+def build_bootstrap(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], debts: list[Debt], month_close_snapshots: list[MonthCloseSnapshot], transactions: list[Transaction], categories: list[CategoryConfig], tags: list[TagConfig]) -> BootstrapResponse:
+    return BootstrapResponse(setup_complete=False, theme_id='emerald_editorial', current_username='', current_user_role=UserRole.operator, can_manage_users=False, can_edit_data=True, users=[], audit_events=[], fixed_income_sources=fixed_income_sources, obligations=obligations, credit_cards=credit_cards, credit_card_statements=credit_card_statements, debts=debts, month_close_snapshots=month_close_snapshots, transactions=transactions, categories=categories, tags=tags, wallets=DEFAULT_WALLETS, dashboard=build_dashboard(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories))

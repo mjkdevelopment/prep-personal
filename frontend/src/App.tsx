@@ -7,6 +7,7 @@ import {
   completeInitialSetup,
   createCreditCard,
   createCreditCardStatement,
+  createDebt,
   createUser,
   createFixedIncomeSource,
   createObligation,
@@ -14,6 +15,7 @@ import {
   deleteCategory,
   deleteCreditCard,
   deleteCreditCardStatement,
+  deleteDebt,
   deleteFixedIncomeSource,
   deleteObligation,
   deleteTag,
@@ -23,6 +25,7 @@ import {
   fetchBootstrap,
   fetchIncomeSuggestion,
   fetchOwnerPanel,
+  generateCurrentMonthClose,
   importFlutterDatabase,
   exportCurrentDatabase,
   login,
@@ -33,6 +36,7 @@ import {
   updateUserAccess,
   updateCreditCard,
   updateCreditCardStatement,
+  updateDebt,
   updateFixedIncomeSource,
   updateObligation,
   updateTransaction,
@@ -51,12 +55,15 @@ import type {
   CreditCardInput,
   CreditCardStatement,
   CreditCardStatementInput,
+  Debt,
+  DebtInput,
   FixedIncomeCadence,
   FixedIncomeSource,
   FixedIncomeSourceInput,
   FlutterImportSummary,
   InitialSetupPayload,
   LoginResponse,
+  MonthCloseSnapshot,
   Obligation,
   ObligationInput,
   OwnerPanelResponse,
@@ -234,6 +241,18 @@ const emptyCreditCardStatement = (): CreditCardStatementInput => {
     items: [],
   }
 }
+
+const emptyDebt = (): DebtInput => ({
+  label: '',
+  lender: '',
+  balance_amount: 0,
+  monthly_payment_amount: 0,
+  currency: 'DOP',
+  payment_day: null,
+  allow_extra_payment: true,
+  active: true,
+  notes: '',
+})
 
 const emptyCategory = (scope: 'income' | 'expense' = 'expense'): CategoryConfigInput => ({
   id: '',
@@ -531,6 +550,7 @@ function App() {
   const [obligationForm, setObligationForm] = useState<ObligationInput>(emptyObligation())
   const [creditCardForm, setCreditCardForm] = useState<CreditCardInput>(emptyCreditCard())
   const [creditCardStatementForm, setCreditCardStatementForm] = useState<CreditCardStatementInput>(emptyCreditCardStatement())
+  const [debtForm, setDebtForm] = useState<DebtInput>(emptyDebt())
   const [categoryForm, setCategoryForm] = useState<CategoryConfigInput>(emptyCategory())
   const [tagForm, setTagForm] = useState<TagConfigInput>(emptyTag())
   const [tagCommandInput, setTagCommandInput] = useState('')
@@ -543,12 +563,14 @@ function App() {
   const [editingObligationId, setEditingObligationId] = useState<number | null>(null)
   const [editingCreditCardId, setEditingCreditCardId] = useState<number | null>(null)
   const [editingCreditCardStatementId, setEditingCreditCardStatementId] = useState<number | null>(null)
+  const [editingDebtId, setEditingDebtId] = useState<number | null>(null)
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [editingTagId, setEditingTagId] = useState<string | null>(null)
   const [suggestion, setSuggestion] = useState<AllocationSuggestion | null>(null)
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [closingMonth, setClosingMonth] = useState(false)
   const [importResult, setImportResult] = useState<FlutterImportSummary | null>(null)
 
   useEffect(() => {
@@ -922,6 +944,25 @@ function App() {
     }
   }
 
+  const handleDebtSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      if (editingDebtId) {
+        await updateDebt(editingDebtId, debtForm)
+      } else {
+        await createDebt(debtForm)
+      }
+      setDebtForm(emptyDebt())
+      setEditingDebtId(null)
+      await load()
+    } catch (submitError) {
+      setError(resolveErrorMessage(submitError, 'No se pudo guardar la deuda.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleCategorySubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSaving(true)
@@ -995,6 +1036,19 @@ function App() {
     }
   }
 
+  const handleGenerateMonthClose = async () => {
+    setClosingMonth(true)
+    try {
+      const snapshot = await generateCurrentMonthClose() as MonthCloseSnapshot
+      await load()
+      window.alert(`Cierre ${snapshot.period_month}/${snapshot.period_year} generado. Margen disponible: ${currency(snapshot.available_margin_now)}.`)
+    } catch (closeError) {
+      setError(resolveErrorMessage(closeError, 'No se pudo generar el cierre mensual.'))
+    } finally {
+      setClosingMonth(false)
+    }
+  }
+
   const handleReset = async () => {
     const confirmed = window.confirm('Se borraran ingresos fijos, gastos fijos y transacciones para volver al asistente inicial. Las categorias y tags personalizados se conservan.\n\n¿Deseas reiniciar?')
     if (!confirmed) {
@@ -1010,6 +1064,8 @@ function App() {
       setObligationForm(emptyObligation(defaultExpenseCategoryId))
       setCreditCardForm(emptyCreditCard())
       setCreditCardStatementForm(emptyCreditCardStatement())
+      setDebtForm(emptyDebt())
+      setEditingDebtId(null)
       await load()
     } catch (resetError) {
       setError(resolveErrorMessage(resetError, 'No se pudo reiniciar la configuracion.'))
@@ -1241,15 +1297,19 @@ function App() {
           setCreditCardForm={setCreditCardForm}
           creditCardStatementForm={creditCardStatementForm}
           setCreditCardStatementForm={setCreditCardStatementForm}
+          debtForm={debtForm}
+          setDebtForm={setDebtForm}
           editingFixedIncomeId={editingFixedIncomeId}
           editingObligationId={editingObligationId}
           editingCreditCardId={editingCreditCardId}
           editingCreditCardStatementId={editingCreditCardStatementId}
+          editingDebtId={editingDebtId}
           expenseCategories={expenseCategories}
           onFixedIncomeSubmit={handleFixedIncomeSubmit}
           onObligationSubmit={handleObligationSubmit}
           onCreditCardSubmit={handleCreditCardSubmit}
           onCreditCardStatementSubmit={handleCreditCardStatementSubmit}
+          onDebtSubmit={handleDebtSubmit}
           onEditFixedIncome={(item) => {
             setEditingFixedIncomeId(item.id)
             setFixedIncomeForm({ label: item.label, amount: item.amount, cadence: item.cadence, expected_day: item.expected_day, expected_weekday: item.expected_weekday, wallet: item.wallet, active: item.active })
@@ -1275,6 +1335,10 @@ function App() {
               items: item.items.map((statementItem) => ({ obligation_id: statementItem.obligation_id, amount: statementItem.amount })),
             })
           }}
+          onEditDebt={(item) => {
+            setEditingDebtId(item.id)
+            setDebtForm({ label: item.label, lender: item.lender, balance_amount: item.balance_amount, monthly_payment_amount: item.monthly_payment_amount, currency: item.currency, payment_day: item.payment_day, allow_extra_payment: item.allow_extra_payment, active: item.active, notes: item.notes })
+          }}
           onDeleteFixedIncome={async (id) => {
             await deleteFixedIncomeSource(id)
             await load()
@@ -1291,6 +1355,14 @@ function App() {
             await deleteCreditCardStatement(id)
             await load()
           }}
+          onDeleteDebt={async (id) => {
+            await deleteDebt(id)
+            if (editingDebtId === id) {
+              setEditingDebtId(null)
+              setDebtForm(emptyDebt())
+            }
+            await load()
+          }}
         />
       ) : null}
       {activeTab === 'settings' ? (
@@ -1300,6 +1372,7 @@ function App() {
           saving={saving}
           importing={importing}
           exporting={exporting}
+          closingMonth={closingMonth}
           selectedTheme={selectedTheme}
           onThemeSelect={async (themeId) => {
             setSelectedTheme(themeId)
@@ -1362,6 +1435,7 @@ function App() {
           onImportFileChange={setImportFile}
           onImport={() => void handleImport()}
           onExport={() => void handleExport()}
+          onGenerateMonthClose={() => void handleGenerateMonthClose()}
           onReset={() => void handleReset()}
           resetCategoryForm={() => {
             setEditingCategoryId(null)
@@ -1446,12 +1520,6 @@ function HelpDock({ compact = false }: { compact?: boolean }) {
 }
 
 function DashboardTab({ data }: { data: BootstrapResponse }) {
-  const freeMarginRecommendation = data.dashboard.goals_reserved < data.dashboard.goals_target
-    ? 'Aumentar ahorro, inversion o deuda'
-    : data.dashboard.pending_obligations_total > 0
-      ? 'Cerrar obligaciones pendientes'
-      : 'Liberar una parte a uso personal'
-
   return (
     <>
       <section className="stats-grid stats-grid-4">
@@ -1527,13 +1595,19 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
               <span className="metric-kicker">Disponible hoy</span>
               <strong>{currency(data.dashboard.free_margin_available_now)}</strong>
             </div>
+            {data.dashboard.debt_total_balance > 0 ? (
+              <div className="free-margin-card">
+                <span className="metric-kicker">Capacidad extra a deuda</span>
+                <strong>{currency(data.dashboard.debt_extra_payment_capacity)}</strong>
+              </div>
+            ) : null}
           </div>
         </Panel>
         <Panel title="Decidir excedente" subtitle="Elige destino.">
           <div className="decision-grid">
             <article className="decision-card recommended">
               <span className="metric-kicker">Prioridad sugerida</span>
-              <strong>{freeMarginRecommendation}</strong>
+              <strong>{data.dashboard.recommended_free_margin_destination}</strong>
             </article>
             <article className="decision-card">
               <strong>Pasar a ahorro o inversion</strong>
@@ -1950,23 +2024,29 @@ function BaseTab({
   setCreditCardForm,
   creditCardStatementForm,
   setCreditCardStatementForm,
+  debtForm,
+  setDebtForm,
   editingFixedIncomeId,
   editingObligationId,
   editingCreditCardId,
   editingCreditCardStatementId,
+  editingDebtId,
   expenseCategories,
   onFixedIncomeSubmit,
   onObligationSubmit,
   onCreditCardSubmit,
   onCreditCardStatementSubmit,
+  onDebtSubmit,
   onEditFixedIncome,
   onEditObligation,
   onEditCreditCard,
   onEditCreditCardStatement,
+  onEditDebt,
   onDeleteFixedIncome,
   onDeleteObligation,
   onDeleteCreditCard,
   onDeleteCreditCardStatement,
+  onDeleteDebt,
 }: {
   data: BootstrapResponse
   canEditData: boolean
@@ -1979,23 +2059,29 @@ function BaseTab({
   setCreditCardForm: Dispatch<SetStateAction<CreditCardInput>>
   creditCardStatementForm: CreditCardStatementInput
   setCreditCardStatementForm: Dispatch<SetStateAction<CreditCardStatementInput>>
+  debtForm: DebtInput
+  setDebtForm: Dispatch<SetStateAction<DebtInput>>
   editingFixedIncomeId: number | null
   editingObligationId: number | null
   editingCreditCardId: number | null
   editingCreditCardStatementId: number | null
+  editingDebtId: number | null
   expenseCategories: CategoryConfig[]
   onFixedIncomeSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onObligationSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onCreditCardSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onCreditCardStatementSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onDebtSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onEditFixedIncome: (item: FixedIncomeSource) => void
   onEditObligation: (item: Obligation) => void
   onEditCreditCard: (item: CreditCard) => void
   onEditCreditCardStatement: (item: CreditCardStatement) => void
+  onEditDebt: (item: Debt) => void
   onDeleteFixedIncome: (id: number) => Promise<void>
   onDeleteObligation: (id: number) => Promise<void>
   onDeleteCreditCard: (id: number) => Promise<void>
   onDeleteCreditCardStatement: (id: number) => Promise<void>
+  onDeleteDebt: (id: number) => Promise<void>
 }) {
   const incomeWallets = new Map(data.wallets.map((wallet) => [wallet, walletVisual(wallet)]))
   const selectedStatementCard = data.credit_cards.find((item) => item.id === creditCardStatementForm.credit_card_id) ?? null
@@ -2206,6 +2292,68 @@ function BaseTab({
           ))}
         </div>
       </Panel>
+      <Panel title="Deudas reales" subtitle="Saldo, cuota y espacio para abonos extra.">
+        <form className="form-grid dynamic-form compact" onSubmit={onDebtSubmit}>
+          <label>
+            Etiqueta
+            <input value={debtForm.label} onChange={(event) => setDebtForm((current) => ({ ...current, label: event.target.value }))} />
+          </label>
+          <label>
+            Acreedor
+            <input value={debtForm.lender} onChange={(event) => setDebtForm((current) => ({ ...current, lender: event.target.value }))} />
+          </label>
+          <label>
+            Saldo actual
+            <input type="number" min="0" step="0.01" value={debtForm.balance_amount || ''} onChange={(event) => setDebtForm((current) => ({ ...current, balance_amount: Number(event.target.value) }))} />
+          </label>
+          <label>
+            Pago mensual
+            <input type="number" min="0" step="0.01" value={debtForm.monthly_payment_amount || ''} onChange={(event) => setDebtForm((current) => ({ ...current, monthly_payment_amount: Number(event.target.value) }))} />
+          </label>
+          <label>
+            Moneda
+            <select value={debtForm.currency} onChange={(event) => setDebtForm((current) => ({ ...current, currency: event.target.value }))}>
+              <option value="DOP">DOP</option>
+              <option value="USD">USD</option>
+            </select>
+          </label>
+          <label>
+            Dia de pago
+            <input type="number" min="1" max="31" value={debtForm.payment_day ?? ''} onChange={(event) => setDebtForm((current) => ({ ...current, payment_day: event.target.value ? clampDayOfMonth(Number(event.target.value)) : null }))} />
+          </label>
+          <label className="checkbox-row span-2">
+            <input type="checkbox" checked={debtForm.allow_extra_payment} onChange={(event) => setDebtForm((current) => ({ ...current, allow_extra_payment: event.target.checked }))} /> Permite abonos extra sin penalidad
+          </label>
+          <label className="checkbox-row span-2">
+            <input type="checkbox" checked={debtForm.active} onChange={(event) => setDebtForm((current) => ({ ...current, active: event.target.checked }))} /> Activa
+          </label>
+          <label className="span-2">
+            Notas
+            <textarea rows={2} value={debtForm.notes} onChange={(event) => setDebtForm((current) => ({ ...current, notes: event.target.value }))} />
+          </label>
+          <div className="span-2 action-row">
+            <button type="submit" disabled={saving || !canEditData}>{editingDebtId ? 'Actualizar deuda' : 'Agregar deuda'}</button>
+          </div>
+        </form>
+        <div className="list-stack">
+          {data.debts.map((item) => (
+            <article key={item.id} className="list-card">
+              <div className="list-leading list-leading-top">
+                <VisualBadge iconToken="scale" colorToken={item.active ? 'plum' : 'stone'} />
+                <div>
+                  <strong>{item.label}</strong>
+                  <p>{item.lender || 'Sin acreedor'} · cuota {currency(item.monthly_payment_amount)} · saldo {currency(item.balance_amount)} {item.currency}</p>
+                  <small>{item.allow_extra_payment ? 'Permite abonos extra' : 'Sin abonos extra definidos'}{item.payment_day ? ` · pago dia ${item.payment_day}` : ''}</small>
+                </div>
+              </div>
+              <div className="list-actions">
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEditDebt(item)}>Editar</button>
+                <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDeleteDebt(item.id)}>Borrar</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </Panel>
       <Panel title="Estados de cuenta" subtitle="Concilia lo fijo del ciclo antes de pagar la tarjeta.">
         <form className="form-grid dynamic-form compact" onSubmit={onCreditCardStatementSubmit}>
           <label>
@@ -2307,6 +2455,7 @@ function SettingsTab({
   saving,
   importing,
   exporting,
+  closingMonth,
   selectedTheme,
   onThemeSelect,
   passwordForm,
@@ -2331,6 +2480,7 @@ function SettingsTab({
   onImportFileChange,
   onImport,
   onExport,
+  onGenerateMonthClose,
   onReset,
   resetCategoryForm,
   resetTagForm,
@@ -2340,6 +2490,7 @@ function SettingsTab({
   saving: boolean
   importing: boolean
   exporting: boolean
+  closingMonth: boolean
   selectedTheme: string
   onThemeSelect: (themeId: string) => Promise<void>
   passwordForm: { currentPassword: string; newPassword: string }
@@ -2364,6 +2515,7 @@ function SettingsTab({
   onImportFileChange: (file: File | null) => void
   onImport: () => void
   onExport: () => void
+  onGenerateMonthClose: () => void
   onReset: () => void
   resetCategoryForm: () => void
   resetTagForm: () => void
@@ -2534,6 +2686,33 @@ function SettingsTab({
           </div>
           <p>El importador conserva ingresos fijos, obligaciones, transacciones, categorias y tags del archivo legado.</p>
           {importResult ? <div className="suggestion-card"><p>Importados {importResult.fixed_income_sources} ingresos fijos, {importResult.obligations} obligaciones y {importResult.transactions} movimientos.</p></div> : null}
+        </div>
+      </Panel>
+      <Panel title="Cierre mensual" subtitle="Snapshot manual del estado actual del mes.">
+        <div className="column-stack">
+          {!canEditData ? <p className="read-only-note">Solo lectura para esta cuenta.</p> : null}
+          <div className="action-row">
+            <button type="button" disabled={closingMonth || !canEditData} onClick={onGenerateMonthClose}>{closingMonth ? 'Generando cierre...' : 'Generar cierre actual'}</button>
+          </div>
+          <p>Guarda una foto del mes con ingresos, obligaciones, liquidez, deuda y sugerencias de arrastre o abono extra.</p>
+          <div className="list-stack">
+            {data.month_close_snapshots.map((snapshot) => (
+              <article key={snapshot.id} className="list-card">
+                <div className="list-leading list-leading-top">
+                  <VisualBadge iconToken="calendar" colorToken="sage" />
+                  <div>
+                    <strong>{snapshot.period_month}/{snapshot.period_year}</strong>
+                    <p>Liquidez {currency(snapshot.cash_on_hand)} · margen actual {currency(snapshot.available_margin_now)} · deuda activa {currency(snapshot.debt_total_balance)}</p>
+                    <small>Arrastre vencido {currency(snapshot.overdue_obligations_amount)} · buffer siguiente ciclo {currency(snapshot.next_cycle_start_buffer)} · abono extra sugerido {currency(snapshot.suggested_extra_debt_payment)}</small>
+                  </div>
+                </div>
+                <div className="list-actions">
+                  <span className="amount neutral">Carryover {currency(snapshot.suggested_carryover_amount)}</span>
+                </div>
+              </article>
+            ))}
+            {data.month_close_snapshots.length === 0 ? <div className="banner">Todavia no has generado cierres mensuales.</div> : null}
+          </div>
         </div>
       </Panel>
       <HelpDock />

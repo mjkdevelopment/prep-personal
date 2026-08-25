@@ -219,6 +219,55 @@ class CreditCardAlert(BaseModel):
     remaining_amount: float
 
 
+class DebtBase(BaseModel):
+    label: str = Field(min_length=1)
+    lender: str = ''
+    balance_amount: float = Field(ge=0)
+    monthly_payment_amount: float = Field(ge=0)
+    currency: str = Field(min_length=1, default='DOP')
+    payment_day: Optional[int] = Field(default=None, ge=1, le=31)
+    allow_extra_payment: bool = True
+    active: bool = True
+    notes: str = ''
+
+
+class DebtCreate(DebtBase):
+    pass
+
+
+class Debt(DebtBase):
+    id: int
+
+
+class MonthCloseSnapshot(BaseModel):
+    id: int
+    period_year: int
+    period_month: int
+    closed_at_iso: str
+    income_expected: float
+    income_reported: float
+    income_delta: float
+    income_delta_percent: float
+    obligations_target: float
+    obligations_reserved: float
+    pending_obligations: float
+    cash_on_hand: float
+    structural_margin: float
+    available_margin_now: float
+    recommended_personal_remaining: float
+    overdue_obligations_amount: float
+    next_cycle_obligations_amount: float
+    next_cycle_start_buffer: float
+    goals_shortfall_amount: float
+    debt_payment_target: float
+    debt_total_balance: float
+    suggested_carryover_amount: float
+    suggested_extra_debt_payment: float
+    highlights: list[str]
+    concerns: list[str]
+    next_actions: list[str]
+
+
 class AllocationSuggestion(BaseModel):
     for_obligations: float
     for_goals: float
@@ -272,6 +321,11 @@ class DashboardSummary(BaseModel):
     pending_obligations_total: float
     obligations_target: float
     obligations_reserved: float
+    overdue_obligations_total: float
+    debt_payment_target: float
+    debt_total_balance: float
+    debt_extra_payment_capacity: float
+    recommended_free_margin_destination: str
     goals_target: float
     goals_reserved: float
     personal_spent_this_month: float
@@ -302,6 +356,8 @@ class BootstrapResponse(BaseModel):
     obligations: list[Obligation]
     credit_cards: list[CreditCard]
     credit_card_statements: list[CreditCardStatement]
+    debts: list[Debt]
+    month_close_snapshots: list[MonthCloseSnapshot]
     transactions: list[Transaction]
     categories: list[CategoryConfig]
     tags: list[TagConfig]

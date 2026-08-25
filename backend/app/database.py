@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterator
 
 from .defaults import DEFAULT_CATEGORIES, DEFAULT_TAGS
-from .schemas import AuditEvent, CategoryConfig, CreditCard, CreditCardStatement, CreditCardStatementItem, FixedIncomeSource, Obligation, TagConfig, Transaction, UserRole, UserSummary
+from .schemas import AuditEvent, CategoryConfig, CreditCard, CreditCardStatement, CreditCardStatementItem, Debt, FixedIncomeSource, MonthCloseSnapshot, Obligation, TagConfig, Transaction, UserRole, UserSummary
 
 
 @dataclass
@@ -70,6 +70,8 @@ class Database:
             connection.execute('CREATE TABLE IF NOT EXISTS credit_cards(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, label TEXT NOT NULL, last4 TEXT NOT NULL, closing_day INTEGER NOT NULL, due_day INTEGER NOT NULL, limit_amount REAL NOT NULL, active INTEGER NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS credit_card_statements(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, credit_card_id INTEGER NOT NULL, statement_date_iso TEXT NOT NULL, due_date_iso TEXT NOT NULL, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, statement_amount REAL NOT NULL, notes TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS credit_card_statement_items(id INTEGER PRIMARY KEY AUTOINCREMENT, statement_id INTEGER NOT NULL, obligation_id INTEGER NOT NULL, amount REAL NOT NULL)')
+            connection.execute('CREATE TABLE IF NOT EXISTS debts(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, label TEXT NOT NULL, lender TEXT NOT NULL, balance_amount REAL NOT NULL, monthly_payment_amount REAL NOT NULL, currency TEXT NOT NULL, payment_day INTEGER, allow_extra_payment INTEGER NOT NULL, active INTEGER NOT NULL, notes TEXT NOT NULL)')
+            connection.execute('CREATE TABLE IF NOT EXISTS month_close_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, closed_at_iso TEXT NOT NULL, income_expected REAL NOT NULL, income_reported REAL NOT NULL, income_delta REAL NOT NULL, income_delta_percent REAL NOT NULL, obligations_target REAL NOT NULL, obligations_reserved REAL NOT NULL, pending_obligations REAL NOT NULL, cash_on_hand REAL NOT NULL, structural_margin REAL NOT NULL, available_margin_now REAL NOT NULL, recommended_personal_remaining REAL NOT NULL, overdue_obligations_amount REAL NOT NULL DEFAULT 0, next_cycle_obligations_amount REAL NOT NULL DEFAULT 0, next_cycle_start_buffer REAL NOT NULL DEFAULT 0, goals_shortfall_amount REAL NOT NULL DEFAULT 0, debt_payment_target REAL NOT NULL, debt_total_balance REAL NOT NULL, suggested_carryover_amount REAL NOT NULL, suggested_extra_debt_payment REAL NOT NULL, highlights_json TEXT NOT NULL, concerns_json TEXT NOT NULL, next_actions_json TEXT NOT NULL, UNIQUE(user_id, period_year, period_month))')
             connection.execute('CREATE TABLE IF NOT EXISTS app_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at_iso TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, theme_id TEXT NOT NULL, setup_complete INTEGER NOT NULL, is_admin INTEGER NOT NULL, created_at_iso TEXT NOT NULL, updated_at_iso TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS trusted_sessions(token_hash TEXT PRIMARY KEY, user_id INTEGER, device_name TEXT NOT NULL, created_at_iso TEXT NOT NULL, last_used_at_iso TEXT NOT NULL)')
@@ -91,6 +93,10 @@ class Database:
             self._ensure_column(connection, 'users', 'created_by_user_id', 'INTEGER')
             self._ensure_user_scoped_categories_table(connection)
             self._ensure_user_scoped_tags_table(connection)
+            self._ensure_column(connection, 'month_close_snapshots', 'overdue_obligations_amount', 'REAL NOT NULL DEFAULT 0')
+            self._ensure_column(connection, 'month_close_snapshots', 'next_cycle_obligations_amount', 'REAL NOT NULL DEFAULT 0')
+            self._ensure_column(connection, 'month_close_snapshots', 'next_cycle_start_buffer', 'REAL NOT NULL DEFAULT 0')
+            self._ensure_column(connection, 'month_close_snapshots', 'goals_shortfall_amount', 'REAL NOT NULL DEFAULT 0')
             self._ensure_column(connection, 'tags', 'command_enabled', 'INTEGER NOT NULL DEFAULT 0')
             self._ensure_column(connection, 'tags', 'preset_transaction_kind', 'TEXT')
             self._ensure_column(connection, 'tags', 'preset_fixed_income_source_id', 'INTEGER')
@@ -444,6 +450,57 @@ class Database:
             rows = connection.execute('SELECT * FROM credit_cards WHERE user_id = ? ORDER BY label ASC, last4 ASC', (user_id,)).fetchall()
         return [CreditCard(id=row['id'], label=row['label'], last4=row['last4'], closing_day=row['closing_day'], due_day=row['due_day'], limit_amount=row['limit_amount'], active=bool(row['active'])) for row in rows]
 
+    def list_debts(self, user_id: int) -> list[Debt]:
+        with self.connect() as connection:
+            rows = connection.execute('SELECT * FROM debts WHERE user_id = ? ORDER BY active DESC, monthly_payment_amount DESC, id ASC', (user_id,)).fetchall()
+        return [self._debt(row) for row in rows]
+
+    def create_debt(self, user_id: int, payload: dict) -> Debt:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                'INSERT INTO debts(user_id, label, lender, balance_amount, monthly_payment_amount, currency, payment_day, allow_extra_payment, active, notes) VALUES(:user_id, :label, :lender, :balance_amount, :monthly_payment_amount, :currency, :payment_day, :allow_extra_payment, :active, :notes)',
+                {**payload, 'user_id': user_id, 'allow_extra_payment': 1 if payload.get('allow_extra_payment', True) else 0, 'active': 1 if payload.get('active', True) else 0},
+            )
+            row = connection.execute('SELECT * FROM debts WHERE id = ? AND user_id = ?', (cursor.lastrowid, user_id)).fetchone()
+        return self._debt(row)
+
+    def update_debt(self, user_id: int, item_id: int, payload: dict) -> Debt:
+        with self.connect() as connection:
+            connection.execute(
+                'UPDATE debts SET label = :label, lender = :lender, balance_amount = :balance_amount, monthly_payment_amount = :monthly_payment_amount, currency = :currency, payment_day = :payment_day, allow_extra_payment = :allow_extra_payment, active = :active, notes = :notes WHERE id = :id AND user_id = :user_id',
+                {**payload, 'id': item_id, 'user_id': user_id, 'allow_extra_payment': 1 if payload.get('allow_extra_payment', True) else 0, 'active': 1 if payload.get('active', True) else 0},
+            )
+            row = connection.execute('SELECT * FROM debts WHERE id = ? AND user_id = ?', (item_id, user_id)).fetchone()
+        if row is None:
+            raise ValueError('Deuda no encontrada.')
+        return self._debt(row)
+
+    def delete_debt(self, user_id: int, item_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute('DELETE FROM debts WHERE id = ? AND user_id = ?', (item_id, user_id))
+
+    def list_month_close_snapshots(self, user_id: int) -> list[MonthCloseSnapshot]:
+        with self.connect() as connection:
+            rows = connection.execute('SELECT * FROM month_close_snapshots WHERE user_id = ? ORDER BY period_year DESC, period_month DESC, id DESC', (user_id,)).fetchall()
+        return [self._month_close_snapshot(row) for row in rows]
+
+    def upsert_month_close_snapshot(self, user_id: int, payload: dict) -> MonthCloseSnapshot:
+        with self.connect() as connection:
+            connection.execute(
+                'INSERT INTO month_close_snapshots(user_id, period_year, period_month, closed_at_iso, income_expected, income_reported, income_delta, income_delta_percent, obligations_target, obligations_reserved, pending_obligations, cash_on_hand, structural_margin, available_margin_now, recommended_personal_remaining, overdue_obligations_amount, next_cycle_obligations_amount, next_cycle_start_buffer, goals_shortfall_amount, debt_payment_target, debt_total_balance, suggested_carryover_amount, suggested_extra_debt_payment, highlights_json, concerns_json, next_actions_json) VALUES(:user_id, :period_year, :period_month, :closed_at_iso, :income_expected, :income_reported, :income_delta, :income_delta_percent, :obligations_target, :obligations_reserved, :pending_obligations, :cash_on_hand, :structural_margin, :available_margin_now, :recommended_personal_remaining, :overdue_obligations_amount, :next_cycle_obligations_amount, :next_cycle_start_buffer, :goals_shortfall_amount, :debt_payment_target, :debt_total_balance, :suggested_carryover_amount, :suggested_extra_debt_payment, :highlights_json, :concerns_json, :next_actions_json) ON CONFLICT(user_id, period_year, period_month) DO UPDATE SET closed_at_iso = excluded.closed_at_iso, income_expected = excluded.income_expected, income_reported = excluded.income_reported, income_delta = excluded.income_delta, income_delta_percent = excluded.income_delta_percent, obligations_target = excluded.obligations_target, obligations_reserved = excluded.obligations_reserved, pending_obligations = excluded.pending_obligations, cash_on_hand = excluded.cash_on_hand, structural_margin = excluded.structural_margin, available_margin_now = excluded.available_margin_now, recommended_personal_remaining = excluded.recommended_personal_remaining, overdue_obligations_amount = excluded.overdue_obligations_amount, next_cycle_obligations_amount = excluded.next_cycle_obligations_amount, next_cycle_start_buffer = excluded.next_cycle_start_buffer, goals_shortfall_amount = excluded.goals_shortfall_amount, debt_payment_target = excluded.debt_payment_target, debt_total_balance = excluded.debt_total_balance, suggested_carryover_amount = excluded.suggested_carryover_amount, suggested_extra_debt_payment = excluded.suggested_extra_debt_payment, highlights_json = excluded.highlights_json, concerns_json = excluded.concerns_json, next_actions_json = excluded.next_actions_json',
+                {
+                    'user_id': user_id,
+                    **payload,
+                    'highlights_json': json.dumps(payload.get('highlights', [])),
+                    'concerns_json': json.dumps(payload.get('concerns', [])),
+                    'next_actions_json': json.dumps(payload.get('next_actions', [])),
+                },
+            )
+            row = connection.execute('SELECT * FROM month_close_snapshots WHERE user_id = ? AND period_year = ? AND period_month = ? LIMIT 1', (user_id, payload['period_year'], payload['period_month'])).fetchone()
+        if row is None:
+            raise ValueError('No se pudo guardar el cierre mensual.')
+        return self._month_close_snapshot(row)
+
     def create_credit_card(self, user_id: int, payload: dict) -> CreditCard:
         with self.connect() as connection:
             cursor = connection.execute(
@@ -612,6 +669,8 @@ class Database:
 
     def complete_initial_setup(self, user_id: int, fixed_income_sources: list[dict], obligations: list[dict]) -> None:
         with self.connect() as connection:
+            connection.execute('DELETE FROM month_close_snapshots WHERE user_id = ?', (user_id,))
+            connection.execute('DELETE FROM debts WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM credit_card_statement_items WHERE statement_id IN (SELECT id FROM credit_card_statements WHERE user_id = ?)', (user_id,))
             connection.execute('DELETE FROM credit_card_statements WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM credit_cards WHERE user_id = ?', (user_id,))
@@ -632,6 +691,8 @@ class Database:
 
     def reset_financial_setup(self, user_id: int) -> None:
         with self.connect() as connection:
+            connection.execute('DELETE FROM month_close_snapshots WHERE user_id = ?', (user_id,))
+            connection.execute('DELETE FROM debts WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM credit_card_statement_items WHERE statement_id IN (SELECT id FROM credit_card_statements WHERE user_id = ?)', (user_id,))
             connection.execute('DELETE FROM credit_card_statements WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM credit_cards WHERE user_id = ?', (user_id,))
@@ -661,6 +722,8 @@ class Database:
                 backup_connection.execute('CREATE TABLE credit_cards(id INTEGER PRIMARY KEY, label TEXT NOT NULL, last4 TEXT NOT NULL, closing_day INTEGER NOT NULL, due_day INTEGER NOT NULL, limit_amount REAL NOT NULL, active INTEGER NOT NULL)')
                 backup_connection.execute('CREATE TABLE credit_card_statements(id INTEGER PRIMARY KEY, credit_card_id INTEGER NOT NULL, statement_date_iso TEXT NOT NULL, due_date_iso TEXT NOT NULL, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, statement_amount REAL NOT NULL, notes TEXT NOT NULL)')
                 backup_connection.execute('CREATE TABLE credit_card_statement_items(id INTEGER PRIMARY KEY, statement_id INTEGER NOT NULL, obligation_id INTEGER NOT NULL, amount REAL NOT NULL)')
+                backup_connection.execute('CREATE TABLE debts(id INTEGER PRIMARY KEY, label TEXT NOT NULL, lender TEXT NOT NULL, balance_amount REAL NOT NULL, monthly_payment_amount REAL NOT NULL, currency TEXT NOT NULL, payment_day INTEGER, allow_extra_payment INTEGER NOT NULL, active INTEGER NOT NULL, notes TEXT NOT NULL)')
+                backup_connection.execute('CREATE TABLE month_close_snapshots(id INTEGER PRIMARY KEY, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, closed_at_iso TEXT NOT NULL, income_expected REAL NOT NULL, income_reported REAL NOT NULL, income_delta REAL NOT NULL, income_delta_percent REAL NOT NULL, obligations_target REAL NOT NULL, obligations_reserved REAL NOT NULL, pending_obligations REAL NOT NULL, cash_on_hand REAL NOT NULL, structural_margin REAL NOT NULL, available_margin_now REAL NOT NULL, recommended_personal_remaining REAL NOT NULL, overdue_obligations_amount REAL NOT NULL, next_cycle_obligations_amount REAL NOT NULL, next_cycle_start_buffer REAL NOT NULL, goals_shortfall_amount REAL NOT NULL, debt_payment_target REAL NOT NULL, debt_total_balance REAL NOT NULL, suggested_carryover_amount REAL NOT NULL, suggested_extra_debt_payment REAL NOT NULL, highlights_json TEXT NOT NULL, concerns_json TEXT NOT NULL, next_actions_json TEXT NOT NULL)')
                 backup_connection.execute('CREATE TABLE categories(id TEXT PRIMARY KEY, label TEXT NOT NULL, scope TEXT NOT NULL, type TEXT NOT NULL, color_token TEXT NOT NULL, icon_token TEXT NOT NULL, active INTEGER NOT NULL)')
                 backup_connection.execute('CREATE TABLE tags(id TEXT PRIMARY KEY, label TEXT NOT NULL, color_token TEXT NOT NULL, active INTEGER NOT NULL, command_enabled INTEGER NOT NULL, preset_transaction_kind TEXT, preset_fixed_income_source_id INTEGER, preset_obligation_id INTEGER, preset_settlement_mode TEXT, preset_amount REAL, preset_wallet TEXT, preset_category TEXT, preset_recurring INTEGER)')
                 backup_connection.execute('CREATE TABLE export_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)')
@@ -681,8 +744,16 @@ class Database:
                     'SELECT id, label, last4, closing_day, due_day, limit_amount, active FROM credit_cards WHERE user_id = ? ORDER BY id ASC',
                     (user_id,),
                 ).fetchall()
+                debt_rows = source_connection.execute(
+                    'SELECT id, label, lender, balance_amount, monthly_payment_amount, currency, payment_day, allow_extra_payment, active, notes FROM debts WHERE user_id = ? ORDER BY id ASC',
+                    (user_id,),
+                ).fetchall()
                 statement_rows = source_connection.execute(
                     'SELECT id, credit_card_id, statement_date_iso, due_date_iso, period_year, period_month, statement_amount, notes FROM credit_card_statements WHERE user_id = ? ORDER BY id ASC',
+                    (user_id,),
+                ).fetchall()
+                month_close_rows = source_connection.execute(
+                    'SELECT id, period_year, period_month, closed_at_iso, income_expected, income_reported, income_delta, income_delta_percent, obligations_target, obligations_reserved, pending_obligations, cash_on_hand, structural_margin, available_margin_now, recommended_personal_remaining, overdue_obligations_amount, next_cycle_obligations_amount, next_cycle_start_buffer, goals_shortfall_amount, debt_payment_target, debt_total_balance, suggested_carryover_amount, suggested_extra_debt_payment, highlights_json, concerns_json, next_actions_json FROM month_close_snapshots WHERE user_id = ? ORDER BY period_year DESC, period_month DESC, id DESC',
                     (user_id,),
                 ).fetchall()
                 statement_item_rows = source_connection.execute(
@@ -715,8 +786,16 @@ class Database:
                     [tuple(row) for row in credit_card_rows],
                 )
                 backup_connection.executemany(
+                    'INSERT INTO debts(id, label, lender, balance_amount, monthly_payment_amount, currency, payment_day, allow_extra_payment, active, notes) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [tuple(row) for row in debt_rows],
+                )
+                backup_connection.executemany(
                     'INSERT INTO credit_card_statements(id, credit_card_id, statement_date_iso, due_date_iso, period_year, period_month, statement_amount, notes) VALUES(?, ?, ?, ?, ?, ?, ?, ?)',
                     [tuple(row) for row in statement_rows],
+                )
+                backup_connection.executemany(
+                    'INSERT INTO month_close_snapshots(id, period_year, period_month, closed_at_iso, income_expected, income_reported, income_delta, income_delta_percent, obligations_target, obligations_reserved, pending_obligations, cash_on_hand, structural_margin, available_margin_now, recommended_personal_remaining, overdue_obligations_amount, next_cycle_obligations_amount, next_cycle_start_buffer, goals_shortfall_amount, debt_payment_target, debt_total_balance, suggested_carryover_amount, suggested_extra_debt_payment, highlights_json, concerns_json, next_actions_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [tuple(row) for row in month_close_rows],
                 )
                 backup_connection.executemany(
                     'INSERT INTO credit_card_statement_items(id, statement_id, obligation_id, amount) VALUES(?, ?, ?, ?)',
@@ -875,6 +954,41 @@ class Database:
         expected_amount = float(row['amount']) * {'weekly': 4, 'biweekly': 2}.get(row['cadence'], 1)
         settled_amount = min(max(recorded_amount, 0), expected_amount)
         return Obligation(id=row['id'], label=row['label'], amount=row['amount'], category_id=row['category_id'], credit_card_id=row['credit_card_id'], cadence=row['cadence'], due_day=row['due_day'], due_weekday=row['due_weekday'], kind=row['kind'], status=row['status'], current_period_expected_amount=expected_amount, current_period_recorded_amount=settled_amount, current_period_balance=max(expected_amount - settled_amount, 0), current_period_status=self._period_status(settled_amount, expected_amount))
+
+    @staticmethod
+    def _debt(row: sqlite3.Row) -> Debt:
+        return Debt(id=row['id'], label=row['label'], lender=row['lender'], balance_amount=float(row['balance_amount']), monthly_payment_amount=float(row['monthly_payment_amount']), currency=row['currency'], payment_day=row['payment_day'], allow_extra_payment=bool(row['allow_extra_payment']), active=bool(row['active']), notes=row['notes'])
+
+    @staticmethod
+    def _month_close_snapshot(row: sqlite3.Row) -> MonthCloseSnapshot:
+        return MonthCloseSnapshot(
+            id=row['id'],
+            period_year=int(row['period_year']),
+            period_month=int(row['period_month']),
+            closed_at_iso=str(row['closed_at_iso']),
+            income_expected=float(row['income_expected']),
+            income_reported=float(row['income_reported']),
+            income_delta=float(row['income_delta']),
+            income_delta_percent=float(row['income_delta_percent']),
+            obligations_target=float(row['obligations_target']),
+            obligations_reserved=float(row['obligations_reserved']),
+            pending_obligations=float(row['pending_obligations']),
+            cash_on_hand=float(row['cash_on_hand']),
+            structural_margin=float(row['structural_margin']),
+            available_margin_now=float(row['available_margin_now']),
+            recommended_personal_remaining=float(row['recommended_personal_remaining']),
+            overdue_obligations_amount=float(row['overdue_obligations_amount']),
+            next_cycle_obligations_amount=float(row['next_cycle_obligations_amount']),
+            next_cycle_start_buffer=float(row['next_cycle_start_buffer']),
+            goals_shortfall_amount=float(row['goals_shortfall_amount']),
+            debt_payment_target=float(row['debt_payment_target']),
+            debt_total_balance=float(row['debt_total_balance']),
+            suggested_carryover_amount=float(row['suggested_carryover_amount']),
+            suggested_extra_debt_payment=float(row['suggested_extra_debt_payment']),
+            highlights=json.loads(row['highlights_json']),
+            concerns=json.loads(row['concerns_json']),
+            next_actions=json.loads(row['next_actions_json']),
+        )
 
     @staticmethod
     def _transaction(row: sqlite3.Row) -> Transaction:

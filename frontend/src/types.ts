@@ -86,6 +86,48 @@ export interface CreditCardStatement {
   items: CreditCardStatementItem[]
 }
 
+export interface Debt {
+  id: number
+  label: string
+  lender: string
+  balance_amount: number
+  monthly_payment_amount: number
+  currency: string
+  payment_day: number | null
+  allow_extra_payment: boolean
+  active: boolean
+  notes: string
+}
+
+export interface MonthCloseSnapshot {
+  id: number
+  period_year: number
+  period_month: number
+  closed_at_iso: string
+  income_expected: number
+  income_reported: number
+  income_delta: number
+  income_delta_percent: number
+  obligations_target: number
+  obligations_reserved: number
+  pending_obligations: number
+  cash_on_hand: number
+  structural_margin: number
+  available_margin_now: number
+  recommended_personal_remaining: number
+  overdue_obligations_amount: number
+  next_cycle_obligations_amount: number
+  next_cycle_start_buffer: number
+  goals_shortfall_amount: number
+  debt_payment_target: number
+  debt_total_balance: number
+  suggested_carryover_amount: number
+  suggested_extra_debt_payment: number
+  highlights: string[]
+  concerns: string[]
+  next_actions: string[]
+}
+
 export interface CreditCardAlert {
   statement_id: number
   credit_card_id: number
@@ -180,6 +222,11 @@ export interface DashboardSummary {
   pending_obligations_total: number
   obligations_target: number
   obligations_reserved: number
+  overdue_obligations_total: number
+  debt_payment_target: number
+  debt_total_balance: number
+  debt_extra_payment_capacity: number
+  recommended_free_margin_destination: string
   goals_target: number
   goals_reserved: number
   personal_spent_this_month: number
@@ -210,6 +257,8 @@ export interface BootstrapResponse {
   obligations: Obligation[]
   credit_cards: CreditCard[]
   credit_card_statements: CreditCardStatement[]
+  debts: Debt[]
+  month_close_snapshots: MonthCloseSnapshot[]
   transactions: Transaction[]
   categories: CategoryConfig[]
   tags: TagConfig[]
@@ -345,4 +394,16 @@ export interface CreditCardStatementInput {
   statement_amount: number
   notes: string
   items: CreditCardStatementItemInput[]
+}
+
+export interface DebtInput {
+  label: string
+  lender: string
+  balance_amount: number
+  monthly_payment_amount: number
+  currency: string
+  payment_day: number | null
+  allow_extra_payment: boolean
+  active: boolean
+  notes: string
 }

@@ -6,10 +6,12 @@ import type {
   CategoryConfigInput,
   CreditCardInput,
   CreditCardStatementInput,
+  DebtInput,
   FixedIncomeSourceInput,
   FlutterImportSummary,
   InitialSetupPayload,
   LoginResponse,
+  MonthCloseSnapshot,
   OwnerPanelResponse,
   ObligationInput,
   TagConfig,
@@ -139,6 +141,10 @@ export const deleteCreditCard = (id: number) => request(`/credit-cards/${id}`, {
 export const createCreditCardStatement = (payload: CreditCardStatementInput) => request('/credit-card-statements', { method: 'POST', body: JSON.stringify(payload) })
 export const updateCreditCardStatement = (id: number, payload: CreditCardStatementInput) => request(`/credit-card-statements/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
 export const deleteCreditCardStatement = (id: number) => request(`/credit-card-statements/${id}`, { method: 'DELETE' })
+export const createDebt = (payload: DebtInput) => request('/debts', { method: 'POST', body: JSON.stringify(payload) })
+export const updateDebt = (id: number, payload: DebtInput) => request(`/debts/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+export const deleteDebt = (id: number) => request(`/debts/${id}`, { method: 'DELETE' })
+export const generateCurrentMonthClose = () => request<MonthCloseSnapshot>('/month-close/current', { method: 'POST' })
 export const completeInitialSetup = (payload: InitialSetupPayload) => request<BootstrapResponse>('/setup/complete', { method: 'POST', body: JSON.stringify(payload) })
 export const resetInitialSetup = () => request<void>('/setup/reset', { method: 'POST' })
 export const deleteCategory = (id: string) => request<void>(`/categories/${id}`, { method: 'DELETE' })

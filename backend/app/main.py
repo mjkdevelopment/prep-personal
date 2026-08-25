@@ -17,8 +17,8 @@ from starlette.background import BackgroundTask
 
 from .database import Database, UserRecord
 from .importer import import_flutter_database
-from .schemas import AdminBootstrapRequest, AuthStatus, CategoryConfigInput, CreditCardCreate, CreditCardStatementCreate, FixedIncomeSourceCreate, FlutterImportSummary, InitialSetupPayload, LoginRequest, LoginResponse, ObligationCreate, OwnerPanelResponse, PasswordChangeRequest, TagConfigInput, ThemePreferenceUpdate, TransactionCreate, UserAccessUpdateRequest, UserCreateRequest
-from .services import FinancialSnapshot, build_bootstrap, suggest_income_allocation
+from .schemas import AdminBootstrapRequest, AuthStatus, CategoryConfigInput, CreditCardCreate, CreditCardStatementCreate, Debt, DebtCreate, FixedIncomeSourceCreate, FlutterImportSummary, InitialSetupPayload, LoginRequest, LoginResponse, MonthCloseSnapshot, ObligationCreate, OwnerPanelResponse, PasswordChangeRequest, TagConfigInput, ThemePreferenceUpdate, TransactionCreate, UserAccessUpdateRequest, UserCreateRequest
+from .services import FinancialSnapshot, build_bootstrap, build_month_close_snapshot, suggest_income_allocation
 
 
 database = Database()
@@ -113,10 +113,12 @@ def current_state(user_id: int):
     obligations = database.list_obligations(user_id)
     credit_cards = database.list_credit_cards(user_id)
     credit_card_statements = database.list_credit_card_statements(user_id)
+    debts = database.list_debts(user_id)
+    month_close_snapshots = database.list_month_close_snapshots(user_id)
     transactions = database.list_transactions(user_id)
     categories = database.list_categories(user_id)
     tags = database.list_tags(user_id)
-    return fixed_income_sources, obligations, credit_cards, credit_card_statements, transactions, categories, tags
+    return fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, month_close_snapshots, transactions, categories, tags
 
 
 def require_auth(x_session_token: str | None = Header(default=None)) -> UserRecord:
@@ -268,7 +270,7 @@ def bootstrap(user: UserRecord = Depends(require_app_user)):
 
 @app.get('/api/suggestions/income')
 def income_suggestion(amount: float, user: UserRecord = Depends(require_app_user)):
-    fixed_income_sources, obligations, _, _, transactions, _, _ = current_state(user.id)
+    fixed_income_sources, obligations, _, _, _, _, transactions, _, _ = current_state(user.id)
     snapshot = FinancialSnapshot(fixed_income_expected=sum(item.amount for item in fixed_income_sources if item.active), income_reported=sum(item.amount for item in transactions if item.kind == 'ingreso'), pending_obligations=sum(item.amount for item in obligations if item.status != 'Cubierto'))
     return suggest_income_allocation(amount, snapshot)
 
@@ -347,6 +349,51 @@ def update_credit_card_statement(item_id: int, payload: CreditCardStatementCreat
 @app.delete('/api/credit-card-statements/{item_id}', status_code=204)
 def delete_credit_card_statement(item_id: int, user: UserRecord = Depends(require_editor)):
     database.delete_credit_card_statement(user.id, item_id)
+
+
+@app.get('/api/debts', response_model=list[Debt])
+def list_debts(user: UserRecord = Depends(require_app_user)):
+    return database.list_debts(user.id)
+
+
+@app.post('/api/debts', response_model=Debt)
+def create_debt(payload: DebtCreate, user: UserRecord = Depends(require_editor)):
+    try:
+        item = database.create_debt(user.id, payload.model_dump())
+        database.record_audit(user, 'create_debt', 'debt', item.label, f'Saldo {item.balance_amount:.2f}, pago mensual {item.monthly_payment_amount:.2f}.')
+        return item
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put('/api/debts/{item_id}', response_model=Debt)
+def update_debt(item_id: int, payload: DebtCreate, user: UserRecord = Depends(require_editor)):
+    try:
+        item = database.update_debt(user.id, item_id, payload.model_dump())
+        database.record_audit(user, 'update_debt', 'debt', item.label, f'Saldo {item.balance_amount:.2f}, pago mensual {item.monthly_payment_amount:.2f}.')
+        return item
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete('/api/debts/{item_id}', status_code=204)
+def delete_debt(item_id: int, user: UserRecord = Depends(require_editor)):
+    database.delete_debt(user.id, item_id)
+    database.record_audit(user, 'delete_debt', 'debt', str(item_id), 'Deuda eliminada desde Base.')
+
+
+@app.get('/api/month-close', response_model=list[MonthCloseSnapshot])
+def list_month_close_snapshots(user: UserRecord = Depends(require_app_user)):
+    return database.list_month_close_snapshots(user.id)
+
+
+@app.post('/api/month-close/current', response_model=MonthCloseSnapshot)
+def generate_current_month_close(user: UserRecord = Depends(require_editor)):
+    fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, _, transactions, categories, _ = current_state(user.id)
+    payload = build_month_close_snapshot(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories)
+    snapshot = database.upsert_month_close_snapshot(user.id, payload)
+    database.record_audit(user, 'generate_month_close', 'month_close', f'{snapshot.period_year}-{snapshot.period_month:02d}', f'Cierre generado con margen disponible {snapshot.available_margin_now:.2f}.')
+    return snapshot
 
 
 @app.post('/api/transactions')
