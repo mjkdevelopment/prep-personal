@@ -448,7 +448,10 @@ def generate_current_month_close(user: UserRecord = Depends(require_editor)):
 
 @app.post('/api/transactions')
 def create_transaction(payload: TransactionCreate, user: UserRecord = Depends(require_editor)):
-    return database.create_transaction(user.id, payload.model_dump())
+    try:
+        return database.create_transaction(user.id, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.put('/api/transactions/{item_id}')
@@ -456,7 +459,8 @@ def update_transaction(item_id: int, payload: TransactionCreate, user: UserRecor
     try:
         return database.update_transaction(user.id, item_id, payload.model_dump())
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        status_code = 404 if 'not found' in str(exc).lower() or 'no encontrada' in str(exc).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @app.delete('/api/transactions/{item_id}', status_code=204)

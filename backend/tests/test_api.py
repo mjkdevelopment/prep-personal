@@ -447,6 +447,128 @@ def test_debt_balance_updates_override_manual_amortization_guess() -> None:
     assert updated['latest_balance_note'] == 'Saldo confirmado por la app del banco'
 
 
+def test_debt_transactions_require_linked_debt_and_adjust_balance() -> None:
+    headers = ensure_app_headers('debtmovement', '1234')
+
+    debt_a = client.post(
+        '/api/debts',
+        json={
+            'label': 'Vehiculo',
+            'lender': 'Dealer',
+            'balance_amount': 200000,
+            'monthly_payment_amount': 15000,
+            'currency': 'DOP',
+            'payment_day': 29,
+            'interest_rate_percent': None,
+            'interest_rate_period': None,
+            'allow_extra_payment': True,
+            'active': True,
+            'notes': '',
+        },
+        headers=headers,
+    )
+    assert debt_a.status_code == 200
+    debt_b = client.post(
+        '/api/debts',
+        json={
+            'label': 'Cooperativa',
+            'lender': 'Coop',
+            'balance_amount': 500000,
+            'monthly_payment_amount': 22000,
+            'currency': 'DOP',
+            'payment_day': 15,
+            'interest_rate_percent': None,
+            'interest_rate_period': None,
+            'allow_extra_payment': True,
+            'active': True,
+            'notes': '',
+        },
+        headers=headers,
+    )
+    assert debt_b.status_code == 200
+
+    invalid = client.post(
+        '/api/transactions',
+        json={
+            'kind': 'deuda',
+            'amount': 10000,
+            'wallet': 'Banco',
+            'category': 'Pago deuda',
+            'fixed_income_source_id': None,
+            'obligation_id': None,
+            'credit_card_statement_id': None,
+            'debt_id': None,
+            'tags': [],
+            'notes': 'Sin deuda ligada',
+            'date': '2026-08-25T10:00:00',
+            'recurring': False,
+        },
+        headers=headers,
+    )
+    assert invalid.status_code == 400
+    assert 'Selecciona la deuda' in invalid.json()['detail']
+
+    create_payment = client.post(
+        '/api/transactions',
+        json={
+            'kind': 'deuda',
+            'amount': 10000,
+            'wallet': 'Banco',
+            'category': 'Vehiculo',
+            'fixed_income_source_id': None,
+            'obligation_id': None,
+            'credit_card_statement_id': None,
+            'debt_id': debt_a.json()['id'],
+            'tags': [],
+            'notes': 'Abono inicial',
+            'date': '2026-08-25T10:00:00',
+            'recurring': False,
+        },
+        headers=headers,
+    )
+    assert create_payment.status_code == 200
+    created_payload = create_payment.json()
+    assert created_payload['debt_id'] == debt_a.json()['id']
+
+    bootstrap_after_create = client.get('/api/bootstrap', headers=headers)
+    debts_after_create = {item['label']: item for item in bootstrap_after_create.json()['debts']}
+    assert debts_after_create['Vehiculo']['balance_amount'] == 190000
+    assert debts_after_create['Vehiculo']['balance_source'] == 'manual'
+
+    update_payment = client.put(
+        f"/api/transactions/{created_payload['id']}",
+        json={
+            'kind': 'deuda',
+            'amount': 25000,
+            'wallet': 'Banco',
+            'category': 'Cooperativa',
+            'fixed_income_source_id': None,
+            'obligation_id': None,
+            'credit_card_statement_id': None,
+            'debt_id': debt_b.json()['id'],
+            'tags': [],
+            'notes': 'Reasignado',
+            'date': '2026-08-25T12:00:00',
+            'recurring': False,
+        },
+        headers=headers,
+    )
+    assert update_payment.status_code == 200
+
+    bootstrap_after_update = client.get('/api/bootstrap', headers=headers)
+    debts_after_update = {item['label']: item for item in bootstrap_after_update.json()['debts']}
+    assert debts_after_update['Vehiculo']['balance_amount'] == 200000
+    assert debts_after_update['Cooperativa']['balance_amount'] == 475000
+
+    delete_payment = client.delete(f"/api/transactions/{created_payload['id']}", headers=headers)
+    assert delete_payment.status_code == 204
+
+    bootstrap_after_delete = client.get('/api/bootstrap', headers=headers)
+    debts_after_delete = {item['label']: item for item in bootstrap_after_delete.json()['debts']}
+    assert debts_after_delete['Vehiculo']['balance_amount'] == 200000
+    assert debts_after_delete['Cooperativa']['balance_amount'] == 500000
+
+
 def test_debt_priority_uses_interest_when_available() -> None:
     headers = ensure_app_headers('debtrate', '1234')
     debt_a = client.post(

@@ -87,6 +87,7 @@ class TransactionBase(BaseModel):
     fixed_income_source_id: Optional[int] = None
     obligation_id: Optional[int] = None
     credit_card_statement_id: Optional[int] = None
+    debt_id: Optional[int] = None
     tags: list[str] = Field(default_factory=list)
     notes: str = ''
     date: datetime

@@ -214,6 +214,7 @@ const emptyTransaction = (wallet = 'Banco', category = ''): TransactionInput => 
   fixed_income_source_id: null,
   obligation_id: null,
   credit_card_statement_id: null,
+  debt_id: null,
   tags: [],
   notes: '',
   date: formatDateInput(new Date().toISOString()),
@@ -2228,14 +2229,18 @@ function TransactionsTab({
   const activeTags = data.tags.filter((tag) => tag.active)
   const linkedIncomeOptions = data.fixed_income_sources.filter((item) => item.active)
   const linkedObligationOptions = data.obligations
+  const linkedDebtOptions = data.debts.filter((item) => item.active && (item.balance_amount > 0 || item.id === transactionForm.debt_id))
   const linkedCreditCardStatements = data.credit_card_statements.filter((item) => item.remaining_amount > 0 || item.id === transactionForm.credit_card_statement_id)
   const selectedFixedIncome = linkedIncomeOptions.find((item) => item.id === transactionForm.fixed_income_source_id) ?? null
   const selectedObligation = linkedObligationOptions.find((item) => item.id === transactionForm.obligation_id) ?? null
+  const selectedDebt = linkedDebtOptions.find((item) => item.id === transactionForm.debt_id) ?? null
   const selectedCreditCardStatement = linkedCreditCardStatements.find((item) => item.id === transactionForm.credit_card_statement_id) ?? null
   const selectedLinkedBalance = transactionForm.kind === 'ingreso'
     ? selectedFixedIncome?.current_period_balance ?? 0
     : transactionForm.kind === 'gasto'
       ? selectedCreditCardStatement?.remaining_amount ?? selectedObligation?.current_period_balance ?? 0
+      : transactionForm.kind === 'deuda'
+        ? selectedDebt?.balance_amount ?? 0
       : 0
   const filteredTransactions = historyTagFilter
     ? data.transactions.filter((transaction) => transaction.tags.some((label) => sameTagLabel(label, historyTagFilter)))
@@ -2322,7 +2327,7 @@ function TransactionsTab({
               {(Object.keys(transactionKindLabels) as TransactionKind[]).map((kind) => (
                 <button key={kind} type="button" className={transactionForm.kind === kind ? 'kind-chip active' : 'kind-chip'} onClick={() => {
                   setTransactionSettlementMode('partial')
-                  setTransactionForm((current) => ({ ...current, kind, category: '', amount: 0, fixed_income_source_id: null, obligation_id: null, credit_card_statement_id: null }))
+                  setTransactionForm((current) => ({ ...current, kind, category: '', amount: 0, fixed_income_source_id: null, obligation_id: null, credit_card_statement_id: null, debt_id: null }))
                 }}>
                   <strong>{transactionKindLabels[kind]}</strong>
                 </button>
@@ -2437,6 +2442,30 @@ function TransactionsTab({
               ) : null}
             </>
           ) : null}
+          {transactionForm.kind === 'deuda' ? (
+            <>
+              <label>
+                Deuda vinculada
+                <select value={transactionForm.debt_id ?? ''} onChange={(event) => {
+                  const nextId = event.target.value ? Number(event.target.value) : null
+                  const linkedDebt = linkedDebtOptions.find((item) => item.id === nextId) ?? null
+                  setTransactionForm((current) => ({
+                    ...current,
+                    debt_id: nextId,
+                    fixed_income_source_id: null,
+                    obligation_id: null,
+                    credit_card_statement_id: null,
+                    category: linkedDebt ? linkedDebt.label : '',
+                    amount: current.amount > 0 ? current.amount : linkedDebt?.monthly_payment_amount ?? current.amount,
+                  }))
+                }}>
+                  <option value="">Selecciona una deuda</option>
+                  {linkedDebtOptions.map((item) => <option key={item.id} value={item.id}>{`${item.label} · saldo ${currency(item.balance_amount)}`}</option>)}
+                </select>
+              </label>
+              <div className="span-2 banner subtle">{selectedDebt ? `Saldo actual ${currency(selectedDebt.balance_amount)} · Cuota mensual ${currency(selectedDebt.monthly_payment_amount)}.` : 'El pago de deuda necesita una deuda vinculada para que el saldo se rebaje en la app.'}</div>
+            </>
+          ) : null}
           <label>
             Monto
             <input type="number" min="0" step="0.01" value={transactionForm.amount || ''} onChange={(event) => setTransactionForm((current) => ({ ...current, amount: Number(event.target.value) }))} />
@@ -2447,13 +2476,20 @@ function TransactionsTab({
               {data.wallets.map((wallet) => <option key={wallet} value={wallet}>{wallet}</option>)}
             </select>
           </label>
-          <label>
-            Categoria
-            <select value={transactionForm.category} onChange={(event) => setTransactionForm((current) => ({ ...current, category: event.target.value }))}>
-              <option value="">Selecciona una categoria</option>
-              {categoriesForTransactionKind.map((category) => <option key={category.id} value={category.label}>{category.label}</option>)}
-            </select>
-          </label>
+          {transactionForm.kind === 'deuda' ? (
+            <label>
+              Categoria operativa
+              <input value={transactionForm.category} readOnly />
+            </label>
+          ) : (
+            <label>
+              Categoria
+              <select value={transactionForm.category} onChange={(event) => setTransactionForm((current) => ({ ...current, category: event.target.value }))}>
+                <option value="">Selecciona una categoria</option>
+                {categoriesForTransactionKind.map((category) => <option key={category.id} value={category.label}>{category.label}</option>)}
+              </select>
+            </label>
+          )}
           <label>
             Fecha
             <input type="datetime-local" value={transactionForm.date} onChange={(event) => setTransactionForm((current) => ({ ...current, date: event.target.value }))} />
@@ -2467,7 +2503,7 @@ function TransactionsTab({
             Recurrente
           </label>
           <div className="span-2 action-row">
-            <button type="submit" disabled={saving || !canEditData || (transactionSettlementMode === 'complete' && !!(transactionForm.fixed_income_source_id || transactionForm.obligation_id) && selectedLinkedBalance <= 0)}>{editingTransactionId ? 'Guardar cambios' : 'Registrar movimiento'}</button>
+            <button type="submit" disabled={saving || !canEditData || (transactionSettlementMode === 'complete' && !!(transactionForm.fixed_income_source_id || transactionForm.obligation_id) && selectedLinkedBalance <= 0) || (transactionForm.kind === 'deuda' && (!transactionForm.debt_id || selectedLinkedBalance <= 0))}>{editingTransactionId ? 'Guardar cambios' : 'Registrar movimiento'}</button>
             {editingTransactionId ? <button type="button" className="ghost" onClick={onCancelEdit}>Cancelar</button> : null}
           </div>
         </form>
@@ -2507,7 +2543,7 @@ function TransactionsTab({
                 <div>
                   <strong>{transaction.category}</strong>
                   <p>{transaction.kind} · {transaction.wallet} · {new Date(transaction.date).toLocaleString()}</p>
-                  {transaction.fixed_income_source_id || transaction.obligation_id ? <small>{transaction.fixed_income_source_id ? 'Vinculado a ingreso fijo' : 'Vinculado a gasto fijo'}</small> : null}
+                  {transaction.fixed_income_source_id || transaction.obligation_id || transaction.debt_id ? <small>{transaction.fixed_income_source_id ? 'Vinculado a ingreso fijo' : transaction.obligation_id ? 'Vinculado a gasto fijo' : 'Vinculado a deuda'}</small> : null}
                   {transaction.tags.length > 0 ? (
                     <div className="history-tag-row">
                       {transaction.tags.map((label) => {

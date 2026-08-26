@@ -87,6 +87,7 @@ class Database:
             self._ensure_column(connection, 'transactions', 'fixed_income_source_id', 'INTEGER')
             self._ensure_column(connection, 'transactions', 'obligation_id', 'INTEGER')
             self._ensure_column(connection, 'transactions', 'credit_card_statement_id', 'INTEGER')
+            self._ensure_column(connection, 'transactions', 'debt_id', 'INTEGER')
             self._ensure_column(connection, 'trusted_sessions', 'user_id', 'INTEGER')
             self._ensure_column(connection, 'users', 'theme_id', "TEXT NOT NULL DEFAULT 'emerald_editorial'")
             self._ensure_column(connection, 'users', 'emergency_fund_months', 'INTEGER NOT NULL DEFAULT 3')
@@ -565,6 +566,7 @@ class Database:
 
     def delete_debt(self, user_id: int, item_id: int) -> None:
         with self.connect() as connection:
+            connection.execute('UPDATE transactions SET debt_id = NULL WHERE user_id = ? AND debt_id = ?', (user_id, item_id))
             connection.execute('DELETE FROM debt_balance_updates WHERE user_id = ? AND debt_id = ?', (user_id, item_id))
             connection.execute('DELETE FROM debts WHERE id = ? AND user_id = ?', (item_id, user_id))
 
@@ -717,19 +719,25 @@ class Database:
         with self.connect() as connection:
             normalized = self._normalize_transaction_payload(connection, user_id, payload)
             cursor = connection.execute(
-                'INSERT INTO transactions(user_id, kind, amount, wallet, category, fixed_income_source_id, obligation_id, credit_card_statement_id, tags_json, notes, date_iso, recurring) VALUES(:user_id, :kind, :amount, :wallet, :category, :fixed_income_source_id, :obligation_id, :credit_card_statement_id, :tags_json, :notes, :date_iso, :recurring)',
+                'INSERT INTO transactions(user_id, kind, amount, wallet, category, fixed_income_source_id, obligation_id, credit_card_statement_id, debt_id, tags_json, notes, date_iso, recurring) VALUES(:user_id, :kind, :amount, :wallet, :category, :fixed_income_source_id, :obligation_id, :credit_card_statement_id, :debt_id, :tags_json, :notes, :date_iso, :recurring)',
                 {**normalized, 'user_id': user_id, 'tags_json': json.dumps(normalized['tags']), 'date_iso': normalized['date'].isoformat(), 'recurring': 1 if normalized['recurring'] else 0},
             )
+            self._apply_linked_debt_payment_change(connection, user_id, normalized['kind'], normalized.get('debt_id'), float(normalized['amount']))
             row = connection.execute('SELECT * FROM transactions WHERE id = ? AND user_id = ?', (cursor.lastrowid, user_id)).fetchone()
         return self._transaction(row)
 
     def update_transaction(self, user_id: int, item_id: int, payload: dict) -> Transaction:
         with self.connect() as connection:
+            current_row = connection.execute('SELECT * FROM transactions WHERE id = ? AND user_id = ? LIMIT 1', (item_id, user_id)).fetchone()
+            if current_row is None:
+                raise ValueError('Transaction not found')
             normalized = self._normalize_transaction_payload(connection, user_id, payload)
+            self._apply_linked_debt_payment_change(connection, user_id, current_row['kind'], current_row['debt_id'], -float(current_row['amount']))
             connection.execute(
-                'UPDATE transactions SET kind = :kind, amount = :amount, wallet = :wallet, category = :category, fixed_income_source_id = :fixed_income_source_id, obligation_id = :obligation_id, credit_card_statement_id = :credit_card_statement_id, tags_json = :tags_json, notes = :notes, date_iso = :date_iso, recurring = :recurring WHERE id = :id AND user_id = :user_id',
+                'UPDATE transactions SET kind = :kind, amount = :amount, wallet = :wallet, category = :category, fixed_income_source_id = :fixed_income_source_id, obligation_id = :obligation_id, credit_card_statement_id = :credit_card_statement_id, debt_id = :debt_id, tags_json = :tags_json, notes = :notes, date_iso = :date_iso, recurring = :recurring WHERE id = :id AND user_id = :user_id',
                 {**normalized, 'tags_json': json.dumps(normalized['tags']), 'date_iso': normalized['date'].isoformat(), 'recurring': 1 if normalized['recurring'] else 0, 'id': item_id, 'user_id': user_id},
             )
+            self._apply_linked_debt_payment_change(connection, user_id, normalized['kind'], normalized.get('debt_id'), float(normalized['amount']))
             row = connection.execute('SELECT * FROM transactions WHERE id = ? AND user_id = ?', (item_id, user_id)).fetchone()
         if row is None:
             raise ValueError('Transaction not found')
@@ -737,6 +745,10 @@ class Database:
 
     def delete_transaction(self, user_id: int, item_id: int) -> None:
         with self.connect() as connection:
+            row = connection.execute('SELECT * FROM transactions WHERE id = ? AND user_id = ? LIMIT 1', (item_id, user_id)).fetchone()
+            if row is None:
+                return
+            self._apply_linked_debt_payment_change(connection, user_id, row['kind'], row['debt_id'], -float(row['amount']))
             connection.execute('DELETE FROM transactions WHERE id = ? AND user_id = ?', (item_id, user_id))
 
     def replace_fixed_income_sources(self, user_id: int, items: list[dict]) -> None:
@@ -816,7 +828,7 @@ class Database:
             with sqlite3.connect(destination_path) as backup_connection:
                 backup_connection.execute('CREATE TABLE fixed_income_sources(id INTEGER PRIMARY KEY, label TEXT NOT NULL, amount REAL NOT NULL, cadence TEXT NOT NULL, expected_day INTEGER NOT NULL, expected_weekday INTEGER, wallet TEXT NOT NULL, active INTEGER NOT NULL)')
                 backup_connection.execute('CREATE TABLE obligations(id INTEGER PRIMARY KEY, label TEXT NOT NULL, amount REAL NOT NULL, category_id TEXT, credit_card_id INTEGER, cadence TEXT NOT NULL, due_day INTEGER NOT NULL, due_weekday INTEGER, kind TEXT NOT NULL, status TEXT NOT NULL)')
-                backup_connection.execute('CREATE TABLE transactions(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, amount REAL NOT NULL, wallet TEXT NOT NULL, category TEXT NOT NULL, fixed_income_source_id INTEGER, obligation_id INTEGER, credit_card_statement_id INTEGER, tags_json TEXT NOT NULL, notes TEXT NOT NULL, date_iso TEXT NOT NULL, recurring INTEGER NOT NULL)')
+                backup_connection.execute('CREATE TABLE transactions(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, amount REAL NOT NULL, wallet TEXT NOT NULL, category TEXT NOT NULL, fixed_income_source_id INTEGER, obligation_id INTEGER, credit_card_statement_id INTEGER, debt_id INTEGER, tags_json TEXT NOT NULL, notes TEXT NOT NULL, date_iso TEXT NOT NULL, recurring INTEGER NOT NULL)')
                 backup_connection.execute('CREATE TABLE credit_cards(id INTEGER PRIMARY KEY, label TEXT NOT NULL, last4 TEXT NOT NULL, closing_day INTEGER NOT NULL, due_day INTEGER NOT NULL, limit_amount REAL NOT NULL, active INTEGER NOT NULL)')
                 backup_connection.execute('CREATE TABLE credit_card_statements(id INTEGER PRIMARY KEY, credit_card_id INTEGER NOT NULL, statement_date_iso TEXT NOT NULL, due_date_iso TEXT NOT NULL, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, statement_amount REAL NOT NULL, notes TEXT NOT NULL)')
                 backup_connection.execute('CREATE TABLE credit_card_statement_items(id INTEGER PRIMARY KEY, statement_id INTEGER NOT NULL, obligation_id INTEGER NOT NULL, amount REAL NOT NULL)')
@@ -837,7 +849,7 @@ class Database:
                     (user_id,),
                 ).fetchall()
                 transaction_rows = source_connection.execute(
-                    'SELECT id, kind, amount, wallet, category, fixed_income_source_id, obligation_id, credit_card_statement_id, tags_json, notes, date_iso, recurring FROM transactions WHERE user_id = ? ORDER BY id ASC',
+                    'SELECT id, kind, amount, wallet, category, fixed_income_source_id, obligation_id, credit_card_statement_id, debt_id, tags_json, notes, date_iso, recurring FROM transactions WHERE user_id = ? ORDER BY id ASC',
                     (user_id,),
                 ).fetchall()
                 credit_card_rows = source_connection.execute(
@@ -886,7 +898,7 @@ class Database:
                     [tuple(row) for row in obligation_rows],
                 )
                 backup_connection.executemany(
-                    'INSERT INTO transactions(id, kind, amount, wallet, category, fixed_income_source_id, obligation_id, credit_card_statement_id, tags_json, notes, date_iso, recurring) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    'INSERT INTO transactions(id, kind, amount, wallet, category, fixed_income_source_id, obligation_id, credit_card_statement_id, debt_id, tags_json, notes, date_iso, recurring) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     [tuple(row) for row in transaction_rows],
                 )
                 backup_connection.executemany(
@@ -1037,9 +1049,10 @@ class Database:
         fixed_income_source_id = normalized.get('fixed_income_source_id')
         obligation_id = normalized.get('obligation_id')
         credit_card_statement_id = normalized.get('credit_card_statement_id')
-        linked_targets = [value for value in (fixed_income_source_id, obligation_id, credit_card_statement_id) if value is not None]
+        debt_id = normalized.get('debt_id')
+        linked_targets = [value for value in (fixed_income_source_id, obligation_id, credit_card_statement_id, debt_id) if value is not None]
         if len(linked_targets) > 1:
-            raise ValueError('Un movimiento solo puede vincularse a una fuente fija, una obligacion o un estado de tarjeta a la vez.')
+            raise ValueError('Un movimiento solo puede vincularse a una fuente fija, una obligacion, una deuda o un estado de tarjeta a la vez.')
         if fixed_income_source_id is not None:
             if normalized['kind'] != 'ingreso':
                 raise ValueError('Solo un ingreso puede vincularse a un ingreso fijo.')
@@ -1058,7 +1071,25 @@ class Database:
             row = connection.execute('SELECT id FROM credit_card_statements WHERE id = ? AND user_id = ? LIMIT 1', (credit_card_statement_id, user_id)).fetchone()
             if row is None:
                 raise ValueError('Estado de cuenta no encontrado.')
+        if normalized['kind'] == 'deuda' and debt_id is None:
+            raise ValueError('Selecciona la deuda que recibira este pago.')
+        if debt_id is not None:
+            if normalized['kind'] != 'deuda':
+                raise ValueError('Solo un movimiento de deuda puede vincularse a una deuda.')
+            row = connection.execute('SELECT id FROM debts WHERE id = ? AND user_id = ? LIMIT 1', (debt_id, user_id)).fetchone()
+            if row is None:
+                raise ValueError('Deuda no encontrada.')
         return normalized
+
+    def _apply_linked_debt_payment_change(self, connection: sqlite3.Connection, user_id: int, kind: str, debt_id: int | None, amount: float) -> None:
+        if kind != 'deuda' or debt_id is None or abs(amount) <= 1e-9:
+            return
+        row = connection.execute('SELECT balance_amount FROM debts WHERE id = ? AND user_id = ? LIMIT 1', (debt_id, user_id)).fetchone()
+        if row is None:
+            raise ValueError('Deuda no encontrada.')
+        current_balance = float(row['balance_amount'])
+        next_balance = max(current_balance - float(amount), 0)
+        connection.execute('UPDATE debts SET balance_amount = ? WHERE id = ? AND user_id = ?', (next_balance, debt_id, user_id))
 
     @staticmethod
     def _fixed_income(row: sqlite3.Row, recorded_amount: float = 0) -> FixedIncomeSource:
@@ -1079,17 +1110,17 @@ class Database:
     def _debt(row: sqlite3.Row, updates: list[DebtBalanceUpdate] | None = None) -> Debt:
         balance_updates = updates or []
         latest_update = balance_updates[0] if balance_updates else None
-        latest_balance = latest_update.balance_amount if latest_update else float(row['balance_amount'])
+        current_balance = float(row['balance_amount'])
         latest_reported_at = latest_update.reported_at_iso if latest_update else None
         latest_note = latest_update.notes if latest_update else ''
         estimated_next_balance_amount = None
         if row['amortization_mode'] == 'fixed_principal' and row['fixed_principal_payment_amount'] is not None:
-            estimated_next_balance_amount = max(float(latest_balance) - float(row['fixed_principal_payment_amount']), 0)
+            estimated_next_balance_amount = max(current_balance - float(row['fixed_principal_payment_amount']), 0)
         return Debt(
             id=row['id'],
             label=row['label'],
             lender=row['lender'],
-            balance_amount=float(latest_balance),
+            balance_amount=current_balance,
             monthly_payment_amount=float(row['monthly_payment_amount']),
             currency=row['currency'],
             payment_day=row['payment_day'],
@@ -1101,7 +1132,7 @@ class Database:
             active=bool(row['active']),
             notes=row['notes'],
             last_balance_reported_at_iso=latest_reported_at,
-            balance_source='reported' if latest_update else 'manual',
+            balance_source='reported' if latest_update and abs(current_balance - latest_update.balance_amount) <= 1e-9 else 'manual',
             balance_update_count=len(balance_updates),
             balance_update_stale=False,
             estimated_next_balance_amount=estimated_next_balance_amount,
@@ -1160,7 +1191,7 @@ class Database:
 
     @staticmethod
     def _transaction(row: sqlite3.Row) -> Transaction:
-        return Transaction(id=row['id'], kind=row['kind'], amount=row['amount'], wallet=row['wallet'], category=row['category'], fixed_income_source_id=row['fixed_income_source_id'], obligation_id=row['obligation_id'], credit_card_statement_id=row['credit_card_statement_id'], tags=json.loads(row['tags_json']), notes=row['notes'], date=datetime.fromisoformat(row['date_iso']), recurring=bool(row['recurring']))
+        return Transaction(id=row['id'], kind=row['kind'], amount=row['amount'], wallet=row['wallet'], category=row['category'], fixed_income_source_id=row['fixed_income_source_id'], obligation_id=row['obligation_id'], credit_card_statement_id=row['credit_card_statement_id'], debt_id=row['debt_id'], tags=json.loads(row['tags_json']), notes=row['notes'], date=datetime.fromisoformat(row['date_iso']), recurring=bool(row['recurring']))
 
     def _credit_card_statements_from_rows(self, statement_rows: list[sqlite3.Row], item_rows: list[sqlite3.Row], payment_rows: list[sqlite3.Row]) -> list[CreditCardStatement]:
         items_by_statement: dict[int, list[CreditCardStatementItem]] = {}

@@ -43,6 +43,7 @@ export interface Transaction {
   fixed_income_source_id: number | null
   obligation_id: number | null
   credit_card_statement_id: number | null
+  debt_id: number | null
   tags: string[]
   notes: string
   date: string
@@ -397,6 +398,7 @@ export interface TransactionInput {
   fixed_income_source_id: number | null
   obligation_id: number | null
   credit_card_statement_id: number | null
+  debt_id: number | null
   tags: string[]
   notes: string
   date: string
