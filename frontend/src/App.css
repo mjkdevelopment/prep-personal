@@ -610,6 +610,20 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.transaction-layout {
+  grid-template-columns: minmax(0, 1.12fr) minmax(340px, 0.88fr);
+  grid-template-areas: 'form history';
+  align-items: start;
+}
+
+.transaction-layout > .transaction-panel {
+  grid-area: form;
+}
+
+.transaction-layout > .transaction-history-panel {
+  grid-area: history;
+}
+
 .content-masonry {
   display: block;
   column-count: 2;
@@ -1403,15 +1417,25 @@ textarea {
 }
 
 .debt-card-copy {
+  display: grid;
+  gap: 14px;
   width: auto;
   min-width: 0;
 }
 
 .debt-card-head {
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.2fr);
-  gap: 16px;
+  grid-template-columns: 1fr;
+  gap: 8px;
   align-items: start;
+}
+
+.debt-card-title strong {
+  display: block;
+}
+
+.debt-card-title p {
+  margin: 4px 0 0;
 }
 
 .debt-card-head p,
@@ -1424,8 +1448,12 @@ textarea {
 
 .debt-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(110px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
+}
+
+.debt-kpi-grid-compact {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
 .debt-kpi {
@@ -1459,7 +1487,10 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 14px;
+}
+
+.debt-chip-row.secondary {
+  gap: 7px;
 }
 
 .debt-chip {
@@ -1471,10 +1502,20 @@ textarea {
   background: rgba(255, 255, 255, 0.68);
   font-size: 0.8rem;
   font-weight: 700;
+  line-height: 1.25;
   color: var(--muted-strong);
+  min-width: 0;
   max-width: 100%;
+  text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.debt-chip-row.secondary .debt-chip {
+  padding: 6px 10px;
+  font-size: 0.76rem;
+  font-weight: 650;
+  background: color-mix(in srgb, var(--paper) 88%, white 12%);
 }
 
 .debt-chip.ok {
@@ -2410,6 +2451,13 @@ textarea {
   .content-masonry,
   .settings-masonry {
     column-count: 1;
+  }
+
+  .transaction-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'form'
+      'history';
   }
 
   .settings-masonry {

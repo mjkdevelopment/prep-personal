@@ -2244,7 +2244,7 @@ function TransactionsTab({
   const matchedCommandTag = findTagByLabel(data.tags, tagCommandInput)
 
   return (
-    <section className="content-grid single-focus content-masonry">
+    <section className="content-grid single-focus transaction-layout">
       {!canEditData ? <div className="banner">Tu perfil es de consulta. Puedes revisar el historial, pero no registrar ni editar movimientos.</div> : null}
       <Panel title={editingTransactionId ? 'Editar movimiento' : 'Registrar movimiento'} className={`transaction-panel kind-${transactionForm.kind}`}>
         <div className={`form-live-banner kind-${transactionForm.kind}`}>
@@ -2482,7 +2482,7 @@ function TransactionsTab({
           </div>
         ) : null}
       </Panel>
-      <Panel title="Historial">
+      <Panel title="Historial" className="transaction-history-panel">
         <div className="history-toolbar">
           <div className="tag-wrap">
             <button type="button" className={historyTagFilter ? 'tag' : 'tag active'} onClick={() => setHistoryTagFilter('')}>Todos</button>
@@ -2929,29 +2929,31 @@ function BaseTab({
                 <VisualBadge iconToken="scale" colorToken={item.active ? 'plum' : 'stone'} />
                 <div className="debt-card-copy">
                   <div className="debt-card-head">
-                    <div>
+                    <div className="debt-card-title">
                       <strong>{item.label}</strong>
                       <p>{item.lender || 'Sin acreedor'} · {item.currency}</p>
                     </div>
-                    <div className="debt-kpi-grid">
-                      <div className="debt-kpi">
-                        <span>Saldo oficial</span>
-                        <strong>{currency(item.balance_amount)}</strong>
-                      </div>
-                      <div className="debt-kpi">
-                        <span>Cuota mensual</span>
-                        <strong>{currency(item.monthly_payment_amount)}</strong>
-                      </div>
-                      <div className="debt-kpi">
-                        <span>Historial</span>
-                        <strong>{item.balance_update_count}</strong>
-                      </div>
+                  </div>
+                  <div className="debt-kpi-grid">
+                    <div className="debt-kpi">
+                      <span>Saldo oficial</span>
+                      <strong>{currency(item.balance_amount)}</strong>
+                    </div>
+                    <div className="debt-kpi">
+                      <span>Cuota mensual</span>
+                      <strong>{currency(item.monthly_payment_amount)}</strong>
+                    </div>
+                    <div className="debt-kpi">
+                      <span>Historial</span>
+                      <strong>{item.balance_update_count}</strong>
                     </div>
                   </div>
                   <div className="debt-chip-row">
                     <span className="debt-chip">{item.balance_source === 'reported' ? 'Saldo confirmado' : 'Saldo manual'}</span>
                     <span className={`debt-chip ${item.balance_update_stale ? 'alert' : 'ok'}`}>{debtFreshnessCopy(item)}</span>
                     <span className="debt-chip">{debtRateCopy(item)}</span>
+                  </div>
+                  <div className="debt-chip-row secondary">
                     <span className="debt-chip">{item.amortization_mode === 'fixed_principal' ? `Capital fijo ${currency(item.fixed_principal_payment_amount ?? 0)}` : 'Modo saldo oficial'}</span>
                     {item.allow_extra_payment ? <span className="debt-chip ok">Permite abonos extra</span> : null}
                     {item.payment_day ? <span className="debt-chip">Pago dia {item.payment_day}</span> : null}
@@ -3085,28 +3087,29 @@ function BaseTab({
                 <VisualBadge iconToken="savings" colorToken={item.availability_status === 'restricted' ? 'gold' : 'emerald'} />
                 <div className="debt-card-copy">
                   <div className="debt-card-head">
-                    <div>
+                    <div className="debt-card-title">
                       <strong>{item.label}</strong>
                       <p>{item.institution || 'Sin institucion'} · {item.currency}</p>
                     </div>
-                    <div className="debt-kpi-grid">
-                      <div className="debt-kpi">
-                        <span>Monto</span>
-                        <strong>{currency(item.balance_amount)}</strong>
-                      </div>
-                      <div className="debt-kpi">
-                        <span>Estado</span>
-                        <strong>{item.availability_status === 'restricted' ? 'Bloqueado' : 'Liberado'}</strong>
-                      </div>
-                      <div className="debt-kpi">
-                        <span>Deuda ligada</span>
-                        <strong>{data.debts.find((debt) => debt.id === item.linked_debt_id)?.label ?? 'Ninguna'}</strong>
-                      </div>
+                  </div>
+                  <div className="debt-kpi-grid debt-kpi-grid-compact">
+                    <div className="debt-kpi">
+                      <span>Monto</span>
+                      <strong>{currency(item.balance_amount)}</strong>
+                    </div>
+                    <div className="debt-kpi">
+                      <span>Estado</span>
+                      <strong>{item.availability_status === 'restricted' ? 'Bloqueado' : 'Liberado'}</strong>
                     </div>
                   </div>
                   <div className="debt-chip-row">
                     <span className={`debt-chip ${item.availability_status === 'restricted' ? 'alert' : 'ok'}`}>{item.availability_status === 'restricted' ? 'No disponible para presupuesto' : 'Disponible pero no es ingreso'}</span>
                   </div>
+                  {item.linked_debt_id ? (
+                    <div className="debt-chip-row secondary">
+                      <span className="debt-chip">Deuda ligada: {data.debts.find((debt) => debt.id === item.linked_debt_id)?.label ?? 'Ninguna'}</span>
+                    </div>
+                  ) : null}
                   {item.release_condition ? <p className="debt-priority-copy">Se libera cuando: {item.release_condition}</p> : null}
                   {item.notes ? <p className="debt-priority-copy">{item.notes}</p> : null}
                 </div>
