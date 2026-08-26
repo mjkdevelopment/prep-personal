@@ -412,6 +412,21 @@
   align-self: start;
 }
 
+.settings-masonry {
+  display: block;
+  column-count: 2;
+  column-gap: 16px;
+}
+
+.settings-masonry > .panel {
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 16px;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+}
+
 .theme-grid {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
@@ -1356,6 +1371,8 @@ textarea {
 }
 
 .debt-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: flex-start;
   gap: 18px;
   padding: 18px;
@@ -1364,9 +1381,14 @@ textarea {
     linear-gradient(180deg, rgba(255, 255, 255, 0.88), color-mix(in srgb, var(--paper) 92%, white 8%));
 }
 
-.debt-card-main,
+.debt-card-main {
+  width: auto;
+  min-width: 0;
+}
+
 .debt-card-copy {
-  width: 100%;
+  width: auto;
+  min-width: 0;
 }
 
 .debt-card-head {
@@ -1386,7 +1408,7 @@ textarea {
 
 .debt-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(110px, 1fr));
   gap: 10px;
 }
 
@@ -1403,10 +1425,18 @@ textarea {
   color: var(--muted);
 }
 
+.debt-kpi span {
+  display: block;
+  font-size: 0.78rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
 .debt-kpi strong {
   display: block;
   margin-top: 6px;
   margin-bottom: 0;
+  overflow-wrap: anywhere;
 }
 
 .debt-chip-row {
@@ -1426,6 +1456,9 @@ textarea {
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--muted-strong);
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .debt-chip.ok {
@@ -1512,6 +1545,18 @@ textarea {
 
 .debt-update-form {
   margin-bottom: 0;
+}
+
+.debt-card .list-actions {
+  width: auto;
+  min-width: 170px;
+  align-self: start;
+  justify-content: flex-end;
+  align-content: flex-start;
+}
+
+.debt-card .list-actions button {
+  white-space: nowrap;
 }
 
 .user-access-actions select {
@@ -2344,11 +2389,25 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .settings-masonry {
+    column-count: 1;
+  }
+
   .debt-card-head,
   .debt-kpi-grid,
   .debt-history-item,
   .debt-history-head {
     grid-template-columns: 1fr;
+  }
+
+  .debt-card {
+    grid-template-columns: 1fr;
+  }
+
+  .debt-card .list-actions {
+    min-width: 0;
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .debt-history-head {

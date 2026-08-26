@@ -16,6 +16,8 @@ import type {
   MonthCloseSnapshot,
   OwnerPanelResponse,
   ObligationInput,
+  RestrictedAsset,
+  RestrictedAssetInput,
   TagConfig,
   TagConfigInput,
   TransactionInput,
@@ -148,6 +150,9 @@ export const createDebt = (payload: DebtInput) => request('/debts', { method: 'P
 export const updateDebt = (id: number, payload: DebtInput) => request(`/debts/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
 export const createDebtBalanceUpdate = (id: number, payload: DebtBalanceUpdateInput) => request<Debt>(`/debts/${id}/balance-updates`, { method: 'POST', body: JSON.stringify(payload) })
 export const deleteDebt = (id: number) => request(`/debts/${id}`, { method: 'DELETE' })
+export const createRestrictedAsset = (payload: RestrictedAssetInput) => request<RestrictedAsset>('/restricted-assets', { method: 'POST', body: JSON.stringify(payload) })
+export const updateRestrictedAsset = (id: number, payload: RestrictedAssetInput) => request<RestrictedAsset>(`/restricted-assets/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+export const deleteRestrictedAsset = (id: number) => request(`/restricted-assets/${id}`, { method: 'DELETE' })
 export const previewCurrentMonthClose = () => request<MonthCloseSnapshot>('/month-close/current/preview', { method: 'POST' })
 export const generateCurrentMonthClose = () => request<MonthCloseSnapshot>('/month-close/current', { method: 'POST' })
 export const completeInitialSetup = (payload: InitialSetupPayload) => request<BootstrapResponse>('/setup/complete', { method: 'POST', body: JSON.stringify(payload) })

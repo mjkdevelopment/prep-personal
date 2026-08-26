@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .defaults import DEFAULT_WALLETS
-from .schemas import AllocationSuggestion, BootstrapResponse, BucketOverview, CategoryConfig, CategorySpendComparison, CreditCard, CreditCardAlert, CreditCardStatement, DashboardSummary, Debt, FixedIncomeSource, InsightView, MonthCloseSnapshot, Obligation, QuincenaReserveView, TagConfig, Transaction, UserRole, WalletBalanceView
+from .schemas import AllocationSuggestion, BootstrapResponse, BucketOverview, CategoryConfig, CategorySpendComparison, CreditCard, CreditCardAlert, CreditCardStatement, DashboardSummary, Debt, FixedIncomeSource, InsightView, MonthCloseSnapshot, Obligation, QuincenaReserveView, RestrictedAsset, TagConfig, Transaction, UserRole, WalletBalanceView
 
 
 @dataclass
@@ -141,6 +141,8 @@ def _debt_priority_snapshot(debts: list[Debt]) -> tuple[str, str, int]:
     annual_rate = _annualized_interest_rate_percent(target)
     if annual_rate > 0:
         reason = f'{target.label} deberia mirarse primero por su tasa anual equivalente de {annual_rate:.2f}% y saldo confirmado de {_round(target.balance_amount):.0f}.'
+    elif target.amortization_mode == 'fixed_principal' and target.fixed_principal_payment_amount:
+        reason = f'{target.label} usa capital fijo de {_round(target.fixed_principal_payment_amount):.0f} por cuota. Sirve como estimacion operativa hasta que registres el saldo oficial.'
     elif target.allow_extra_payment:
         reason = f'{target.label} deberia mirarse primero porque permite abonos extra y mantiene un saldo confirmado de {_round(target.balance_amount):.0f}.'
     else:
@@ -179,7 +181,7 @@ def suggest_income_allocation(amount: float, snapshot: FinancialSnapshot) -> All
     return AllocationSuggestion(for_obligations=_round(obligations_allocation), for_goals=_round(goals_allocation), for_personal=_round(personal_allocation), rationale=rationale)
 
 
-def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], debts: list[Debt], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], transactions: list[Transaction], categories: list[CategoryConfig], emergency_fund_months: int = 3) -> DashboardSummary:
+def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], debts: list[Debt], restricted_assets: list[RestrictedAsset], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], transactions: list[Transaction], categories: list[CategoryConfig], emergency_fund_months: int = 3) -> DashboardSummary:
     now = datetime.now()
     del credit_cards
     transactions_by_id = {item.id: item for item in transactions}
@@ -193,6 +195,8 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
     active_debts = [item for item in debts if item.active]
     debt_payment_target = sum(item.monthly_payment_amount for item in active_debts)
     debt_total_balance = sum(item.balance_amount for item in active_debts)
+    restricted_assets_total = sum(item.balance_amount for item in restricted_assets if item.active and item.availability_status == 'restricted')
+    available_restricted_assets_total = sum(item.balance_amount for item in restricted_assets if item.active and item.availability_status == 'available')
     has_extra_payment_debt = any(item.allow_extra_payment and item.balance_amount > 0 for item in active_debts)
     debt_priority_label, debt_priority_reason, stale_debt_update_count = _debt_priority_snapshot(active_debts)
     monthly_fixed_outflow_total = sum(_monthly_expected_amount(item.amount, item.cadence) for item in obligations)
@@ -270,6 +274,10 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
         insights.append(InsightView(title='Delivery por encima de tendencia', body='Tus gastos en delivery ya superan el umbral mensual esperado. Conviene recortar antes de abrir mas presupuesto personal.'))
     if stale_debt_update_count > 0:
         insights.append(InsightView(title='Deudas con saldo por confirmar', body=f'Tienes {stale_debt_update_count} deuda(s) sin actualizacion reciente. Conviene registrar el balance oficial antes de tomar decisiones agresivas.'))
+    if restricted_assets_total > 0:
+        insights.append(InsightView(title='Patrimonio restringido', body=f'Tienes {_round(restricted_assets_total):.0f} comprometidos en garantia o restricciones. No se tratan como ingreso disponible.'))
+    if available_restricted_assets_total > 0:
+        insights.append(InsightView(title='Fondos liberados por mover', body=f'Tienes {_round(available_restricted_assets_total):.0f} ya liberados. Conviene moverlos a una cartera real sin registrarlos como ingreso del mes.'))
     if debt_total_balance > 0:
         insights.append(InsightView(title='Capitalizacion con prioridad deuda', body=f'Con tu politica 50/30/20, la capitalizacion objetivo del mes es {_round(goals_target):.0f} y debe ir primero a deuda hasta sanear el balance actual.'))
         if debt_priority_label:
@@ -326,6 +334,8 @@ def build_dashboard(fixed_income_sources: list[FixedIncomeSource], obligations: 
         debt_priority_label=debt_priority_label,
         debt_priority_reason=debt_priority_reason,
         stale_debt_update_count=stale_debt_update_count,
+        restricted_assets_total=_round(restricted_assets_total),
+        available_restricted_assets_total=_round(available_restricted_assets_total),
         recommended_free_margin_destination=recommended_free_margin_destination,
         goals_target=_round(goals_target),
         goals_reserved=_round(goals_reserved),
@@ -365,13 +375,14 @@ def build_month_close_snapshot(
     fixed_income_sources: list[FixedIncomeSource],
     obligations: list[Obligation],
     debts: list[Debt],
+    restricted_assets: list[RestrictedAsset],
     credit_cards: list[CreditCard],
     credit_card_statements: list[CreditCardStatement],
     transactions: list[Transaction],
     categories: list[CategoryConfig],
     emergency_fund_months: int = 3,
 ) -> dict:
-    dashboard = build_dashboard(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories, emergency_fund_months)
+    dashboard = build_dashboard(fixed_income_sources, obligations, debts, restricted_assets, credit_cards, credit_card_statements, transactions, categories, emergency_fund_months)
     active_debts = [item for item in debts if item.active]
     debt_payment_target = _round(sum(item.monthly_payment_amount for item in active_debts))
     debt_total_balance = _round(sum(item.balance_amount for item in active_debts))
@@ -450,6 +461,6 @@ def build_month_close_snapshot(
     }
 
 
-def build_bootstrap(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], debts: list[Debt], month_close_snapshots: list[MonthCloseSnapshot], transactions: list[Transaction], categories: list[CategoryConfig], tags: list[TagConfig], emergency_fund_months: int = 3) -> BootstrapResponse:
+def build_bootstrap(fixed_income_sources: list[FixedIncomeSource], obligations: list[Obligation], credit_cards: list[CreditCard], credit_card_statements: list[CreditCardStatement], debts: list[Debt], restricted_assets: list[RestrictedAsset], month_close_snapshots: list[MonthCloseSnapshot], transactions: list[Transaction], categories: list[CategoryConfig], tags: list[TagConfig], emergency_fund_months: int = 3) -> BootstrapResponse:
     enriched_debts = _enriched_debts(debts)
-    return BootstrapResponse(setup_complete=False, theme_id='emerald_editorial', emergency_fund_months=emergency_fund_months if emergency_fund_months in {3, 6} else 3, current_username='', current_user_role=UserRole.operator, can_manage_users=False, can_edit_data=True, users=[], audit_events=[], fixed_income_sources=fixed_income_sources, obligations=obligations, credit_cards=credit_cards, credit_card_statements=credit_card_statements, debts=enriched_debts, month_close_snapshots=month_close_snapshots, transactions=transactions, categories=categories, tags=tags, wallets=DEFAULT_WALLETS, dashboard=build_dashboard(fixed_income_sources, obligations, enriched_debts, credit_cards, credit_card_statements, transactions, categories, emergency_fund_months))
+    return BootstrapResponse(setup_complete=False, theme_id='emerald_editorial', emergency_fund_months=emergency_fund_months if emergency_fund_months in {3, 6} else 3, current_username='', current_user_role=UserRole.operator, can_manage_users=False, can_edit_data=True, users=[], audit_events=[], fixed_income_sources=fixed_income_sources, obligations=obligations, credit_cards=credit_cards, credit_card_statements=credit_card_statements, debts=enriched_debts, restricted_assets=restricted_assets, month_close_snapshots=month_close_snapshots, transactions=transactions, categories=categories, tags=tags, wallets=DEFAULT_WALLETS, dashboard=build_dashboard(fixed_income_sources, obligations, enriched_debts, restricted_assets, credit_cards, credit_card_statements, transactions, categories, emergency_fund_months))

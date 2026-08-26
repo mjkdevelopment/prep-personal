@@ -9,6 +9,7 @@ import {
   createCreditCardStatement,
   createDebt,
   createDebtBalanceUpdate,
+  createRestrictedAsset,
   createUser,
   createFixedIncomeSource,
   createObligation,
@@ -19,6 +20,7 @@ import {
   deleteDebt,
   deleteFixedIncomeSource,
   deleteObligation,
+  deleteRestrictedAsset,
   deleteTag,
   deleteTransaction,
   deleteUser,
@@ -42,6 +44,7 @@ import {
   updateEmergencyFundPreference,
   updateFixedIncomeSource,
   updateObligation,
+  updateRestrictedAsset,
   updateTransaction,
   upsertCategory,
   upsertTag,
@@ -71,6 +74,8 @@ import type {
   Obligation,
   ObligationInput,
   OwnerPanelResponse,
+  RestrictedAsset,
+  RestrictedAssetInput,
   TagConfig,
   TagConfigInput,
   Transaction,
@@ -269,6 +274,8 @@ const emptyDebt = (): DebtInput => ({
   payment_day: null,
   interest_rate_percent: null,
   interest_rate_period: null,
+  amortization_mode: 'reported_balance',
+  fixed_principal_payment_amount: null,
   allow_extra_payment: true,
   active: true,
   notes: '',
@@ -278,6 +285,18 @@ const emptyDebtBalanceUpdate = (): DebtBalanceUpdateInput => ({
   balance_amount: 0,
   reported_at_iso: formatDateOnlyValue(new Date()),
   notes: '',
+})
+
+const emptyRestrictedAsset = (): RestrictedAssetInput => ({
+  label: '',
+  institution: '',
+  balance_amount: 0,
+  currency: 'DOP',
+  availability_status: 'restricted',
+  linked_debt_id: null,
+  release_condition: '',
+  notes: '',
+  active: true,
 })
 
 const emptyCategory = (scope: 'income' | 'expense' = 'expense'): CategoryConfigInput => ({
@@ -578,6 +597,7 @@ function App() {
   const [creditCardStatementForm, setCreditCardStatementForm] = useState<CreditCardStatementInput>(emptyCreditCardStatement())
   const [debtForm, setDebtForm] = useState<DebtInput>(emptyDebt())
   const [debtBalanceUpdateForm, setDebtBalanceUpdateForm] = useState<DebtBalanceUpdateInput>(emptyDebtBalanceUpdate())
+  const [restrictedAssetForm, setRestrictedAssetForm] = useState<RestrictedAssetInput>(emptyRestrictedAsset())
   const [activeDebtBalanceUpdateId, setActiveDebtBalanceUpdateId] = useState<number | null>(null)
   const [categoryForm, setCategoryForm] = useState<CategoryConfigInput>(emptyCategory())
   const [tagForm, setTagForm] = useState<TagConfigInput>(emptyTag())
@@ -592,6 +612,7 @@ function App() {
   const [editingCreditCardId, setEditingCreditCardId] = useState<number | null>(null)
   const [editingCreditCardStatementId, setEditingCreditCardStatementId] = useState<number | null>(null)
   const [editingDebtId, setEditingDebtId] = useState<number | null>(null)
+  const [editingRestrictedAssetId, setEditingRestrictedAssetId] = useState<number | null>(null)
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [editingTagId, setEditingTagId] = useState<string | null>(null)
   const [suggestion, setSuggestion] = useState<AllocationSuggestion | null>(null)
@@ -1010,6 +1031,25 @@ function App() {
     }
   }
 
+  const handleRestrictedAssetSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      if (editingRestrictedAssetId) {
+        await updateRestrictedAsset(editingRestrictedAssetId, restrictedAssetForm)
+      } else {
+        await createRestrictedAsset(restrictedAssetForm)
+      }
+      setRestrictedAssetForm(emptyRestrictedAsset())
+      setEditingRestrictedAssetId(null)
+      await load()
+    } catch (submitError) {
+      setError(resolveErrorMessage(submitError, 'No se pudo guardar el activo restringido.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleCategorySubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSaving(true)
@@ -1364,17 +1404,22 @@ function App() {
           setCreditCardStatementForm={setCreditCardStatementForm}
           debtForm={debtForm}
           setDebtForm={setDebtForm}
+          restrictedAssetForm={restrictedAssetForm}
+          setRestrictedAssetForm={setRestrictedAssetForm}
+          setEditingRestrictedAssetId={setEditingRestrictedAssetId}
           editingFixedIncomeId={editingFixedIncomeId}
           editingObligationId={editingObligationId}
           editingCreditCardId={editingCreditCardId}
           editingCreditCardStatementId={editingCreditCardStatementId}
           editingDebtId={editingDebtId}
+          editingRestrictedAssetId={editingRestrictedAssetId}
           expenseCategories={expenseCategories}
           onFixedIncomeSubmit={handleFixedIncomeSubmit}
           onObligationSubmit={handleObligationSubmit}
           onCreditCardSubmit={handleCreditCardSubmit}
           onCreditCardStatementSubmit={handleCreditCardStatementSubmit}
           onDebtSubmit={handleDebtSubmit}
+          onRestrictedAssetSubmit={handleRestrictedAssetSubmit}
           onEditFixedIncome={(item) => {
             setEditingFixedIncomeId(item.id)
             setFixedIncomeForm({ label: item.label, amount: item.amount, cadence: item.cadence, expected_day: item.expected_day, expected_weekday: item.expected_weekday, wallet: item.wallet, active: item.active })
@@ -1402,7 +1447,11 @@ function App() {
           }}
           onEditDebt={(item) => {
             setEditingDebtId(item.id)
-            setDebtForm({ label: item.label, lender: item.lender, balance_amount: item.balance_amount, monthly_payment_amount: item.monthly_payment_amount, currency: item.currency, payment_day: item.payment_day, interest_rate_percent: item.interest_rate_percent, interest_rate_period: item.interest_rate_period, allow_extra_payment: item.allow_extra_payment, active: item.active, notes: item.notes })
+            setDebtForm({ label: item.label, lender: item.lender, balance_amount: item.balance_amount, monthly_payment_amount: item.monthly_payment_amount, currency: item.currency, payment_day: item.payment_day, interest_rate_percent: item.interest_rate_percent, interest_rate_period: item.interest_rate_period, amortization_mode: item.amortization_mode, fixed_principal_payment_amount: item.fixed_principal_payment_amount, allow_extra_payment: item.allow_extra_payment, active: item.active, notes: item.notes })
+          }}
+          onEditRestrictedAsset={(item) => {
+            setEditingRestrictedAssetId(item.id)
+            setRestrictedAssetForm({ label: item.label, institution: item.institution, balance_amount: item.balance_amount, currency: item.currency, availability_status: item.availability_status, linked_debt_id: item.linked_debt_id, release_condition: item.release_condition, notes: item.notes, active: item.active })
           }}
           activeDebtBalanceUpdateId={activeDebtBalanceUpdateId}
           setActiveDebtBalanceUpdateId={setActiveDebtBalanceUpdateId}
@@ -1430,6 +1479,14 @@ function App() {
             if (editingDebtId === id) {
               setEditingDebtId(null)
               setDebtForm(emptyDebt())
+            }
+            await load()
+          }}
+          onDeleteRestrictedAsset={async (id) => {
+            await deleteRestrictedAsset(id)
+            if (editingRestrictedAssetId === id) {
+              setEditingRestrictedAssetId(null)
+              setRestrictedAssetForm(emptyRestrictedAsset())
             }
             await load()
           }}
@@ -2073,6 +2130,11 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
               <p>Meta sugerida: {currency(data.dashboard.emergency_fund_target)}. Faltan {currency(data.dashboard.emergency_fund_gap)}.{data.dashboard.stale_debt_update_count > 0 ? ` Hay ${data.dashboard.stale_debt_update_count} deuda(s) sin saldo confirmado reciente.` : ''}</p>
             </article>
             <article className="decision-card">
+              <span className="metric-kicker">Patrimonio restringido</span>
+              <strong>{currency(data.dashboard.restricted_assets_total)}</strong>
+              <p>{data.dashboard.available_restricted_assets_total > 0 ? `Liberado sin mover: ${currency(data.dashboard.available_restricted_assets_total)}.` : 'No se trata como ingreso mientras no pase a una cartera real.'}</p>
+            </article>
+            <article className="decision-card">
               <span className="metric-kicker">Inversion habilitada</span>
               <strong>{data.dashboard.investment_unlocked ? currency(data.dashboard.investment_limit_amount) : 'No disponible'}</strong>
               <p>{data.dashboard.investment_unlocked ? `Limite sano sobre excedente real: ${currency(data.dashboard.investment_limit_amount)}.` : 'Primero se sanea deuda o se completa el fondo de seguridad.'}</p>
@@ -2485,6 +2547,9 @@ function BaseTab({
   setCreditCardStatementForm,
   debtForm,
   setDebtForm,
+  restrictedAssetForm,
+  setRestrictedAssetForm,
+  setEditingRestrictedAssetId,
   activeDebtBalanceUpdateId,
   setActiveDebtBalanceUpdateId,
   debtBalanceUpdateForm,
@@ -2494,23 +2559,27 @@ function BaseTab({
   editingCreditCardId,
   editingCreditCardStatementId,
   editingDebtId,
+  editingRestrictedAssetId,
   expenseCategories,
   onFixedIncomeSubmit,
   onObligationSubmit,
   onCreditCardSubmit,
   onCreditCardStatementSubmit,
   onDebtSubmit,
+  onRestrictedAssetSubmit,
   onDebtBalanceUpdateSubmit,
   onEditFixedIncome,
   onEditObligation,
   onEditCreditCard,
   onEditCreditCardStatement,
   onEditDebt,
+  onEditRestrictedAsset,
   onDeleteFixedIncome,
   onDeleteObligation,
   onDeleteCreditCard,
   onDeleteCreditCardStatement,
   onDeleteDebt,
+  onDeleteRestrictedAsset,
 }: {
   data: BootstrapResponse
   canEditData: boolean
@@ -2525,6 +2594,9 @@ function BaseTab({
   setCreditCardStatementForm: Dispatch<SetStateAction<CreditCardStatementInput>>
   debtForm: DebtInput
   setDebtForm: Dispatch<SetStateAction<DebtInput>>
+  restrictedAssetForm: RestrictedAssetInput
+  setRestrictedAssetForm: Dispatch<SetStateAction<RestrictedAssetInput>>
+  setEditingRestrictedAssetId: Dispatch<SetStateAction<number | null>>
   activeDebtBalanceUpdateId: number | null
   setActiveDebtBalanceUpdateId: Dispatch<SetStateAction<number | null>>
   debtBalanceUpdateForm: DebtBalanceUpdateInput
@@ -2534,23 +2606,27 @@ function BaseTab({
   editingCreditCardId: number | null
   editingCreditCardStatementId: number | null
   editingDebtId: number | null
+  editingRestrictedAssetId: number | null
   expenseCategories: CategoryConfig[]
   onFixedIncomeSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onObligationSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onCreditCardSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onCreditCardStatementSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onDebtSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onRestrictedAssetSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onDebtBalanceUpdateSubmit: (debtId: number) => Promise<void>
   onEditFixedIncome: (item: FixedIncomeSource) => void
   onEditObligation: (item: Obligation) => void
   onEditCreditCard: (item: CreditCard) => void
   onEditCreditCardStatement: (item: CreditCardStatement) => void
   onEditDebt: (item: Debt) => void
+  onEditRestrictedAsset: (item: RestrictedAsset) => void
   onDeleteFixedIncome: (id: number) => Promise<void>
   onDeleteObligation: (id: number) => Promise<void>
   onDeleteCreditCard: (id: number) => Promise<void>
   onDeleteCreditCardStatement: (id: number) => Promise<void>
   onDeleteDebt: (id: number) => Promise<void>
+  onDeleteRestrictedAsset: (id: number) => Promise<void>
 }) {
   const incomeWallets = new Map(data.wallets.map((wallet) => [wallet, walletVisual(wallet)]))
   const selectedStatementCard = data.credit_cards.find((item) => item.id === creditCardStatementForm.credit_card_id) ?? null
@@ -2821,6 +2897,17 @@ function BaseTab({
               <option value="annual">Anual</option>
             </select>
           </label>
+          <label>
+            Modo de seguimiento
+            <select value={debtForm.amortization_mode} onChange={(event) => setDebtForm((current) => ({ ...current, amortization_mode: event.target.value as 'reported_balance' | 'fixed_principal', fixed_principal_payment_amount: event.target.value === 'fixed_principal' ? current.fixed_principal_payment_amount : null }))}>
+              <option value="reported_balance">Saldo reportado</option>
+              <option value="fixed_principal">Capital fijo por cuota</option>
+            </select>
+          </label>
+          <label>
+            Capital fijo por pago
+            <input type="number" min="0" step="0.01" value={debtForm.fixed_principal_payment_amount ?? ''} onChange={(event) => setDebtForm((current) => ({ ...current, fixed_principal_payment_amount: event.target.value ? Number(event.target.value) : null }))} placeholder="Opcional" disabled={debtForm.amortization_mode !== 'fixed_principal'} />
+          </label>
           <label className="checkbox-row span-2">
             <input type="checkbox" checked={debtForm.allow_extra_payment} onChange={(event) => setDebtForm((current) => ({ ...current, allow_extra_payment: event.target.checked }))} /> Permite abonos extra sin penalidad
           </label>
@@ -2865,10 +2952,12 @@ function BaseTab({
                     <span className="debt-chip">{item.balance_source === 'reported' ? 'Saldo confirmado' : 'Saldo manual'}</span>
                     <span className={`debt-chip ${item.balance_update_stale ? 'alert' : 'ok'}`}>{debtFreshnessCopy(item)}</span>
                     <span className="debt-chip">{debtRateCopy(item)}</span>
+                    <span className="debt-chip">{item.amortization_mode === 'fixed_principal' ? `Capital fijo ${currency(item.fixed_principal_payment_amount ?? 0)}` : 'Modo saldo oficial'}</span>
                     {item.allow_extra_payment ? <span className="debt-chip ok">Permite abonos extra</span> : null}
                     {item.payment_day ? <span className="debt-chip">Pago dia {item.payment_day}</span> : null}
                   </div>
                   {item.priority_reason ? <p className="debt-priority-copy">{item.priority_reason}</p> : null}
+                  {item.estimated_next_balance_amount !== null ? <p className="debt-priority-copy">Estimacion operativa siguiente saldo: {currency(item.estimated_next_balance_amount)}. No sustituye el balance oficial.</p> : null}
                   <div className="debt-history-block">
                     <div className="debt-history-head">
                       <span className="metric-kicker">Ultimos movimientos reportados</span>
@@ -2919,6 +3008,112 @@ function BaseTab({
                 <button type="button" className="ghost" disabled={!canEditData} onClick={() => { setActiveDebtBalanceUpdateId(item.id); setDebtBalanceUpdateForm({ balance_amount: item.balance_amount, reported_at_iso: formatDateOnlyValue(new Date()), notes: '' }) }}>Reportar saldo</button>
                 <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEditDebt(item)}>Editar</button>
                 <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDeleteDebt(item.id)}>Borrar</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="Activos restringidos" subtitle="Dinero tuyo que existe, pero no debe entrar como ingreso disponible.">
+        {data.restricted_assets.length > 0 ? (
+          <div className="debt-overview-strip">
+            <article className="debt-overview-metric featured">
+              <span className="metric-kicker">En garantia o bloqueo</span>
+              <strong>{currency(data.dashboard.restricted_assets_total)}</strong>
+              <p>No entra al presupuesto operativo.</p>
+            </article>
+            <article className="debt-overview-metric">
+              <span className="metric-kicker">Ya liberado</span>
+              <strong>{currency(data.dashboard.available_restricted_assets_total)}</strong>
+              <p>Conviene moverlo a una cartera real sin marcar ingreso.</p>
+            </article>
+          </div>
+        ) : null}
+        <form className="form-grid dynamic-form compact" onSubmit={onRestrictedAssetSubmit}>
+          <label>
+            Etiqueta
+            <input value={restrictedAssetForm.label} onChange={(event) => setRestrictedAssetForm((current) => ({ ...current, label: event.target.value }))} />
+          </label>
+          <label>
+            Institucion
+            <input value={restrictedAssetForm.institution} onChange={(event) => setRestrictedAssetForm((current) => ({ ...current, institution: event.target.value }))} />
+          </label>
+          <label>
+            Monto
+            <input type="number" min="0" step="0.01" value={restrictedAssetForm.balance_amount || ''} onChange={(event) => setRestrictedAssetForm((current) => ({ ...current, balance_amount: Number(event.target.value) }))} />
+          </label>
+          <label>
+            Estado
+            <select value={restrictedAssetForm.availability_status} onChange={(event) => setRestrictedAssetForm((current) => ({ ...current, availability_status: event.target.value as 'restricted' | 'available' }))}>
+              <option value="restricted">Restringido</option>
+              <option value="available">Disponible</option>
+            </select>
+          </label>
+          <label>
+            Moneda
+            <select value={restrictedAssetForm.currency} onChange={(event) => setRestrictedAssetForm((current) => ({ ...current, currency: event.target.value }))}>
+              <option value="DOP">DOP</option>
+              <option value="USD">USD</option>
+            </select>
+          </label>
+          <label>
+            Deuda asociada
+            <select value={restrictedAssetForm.linked_debt_id ?? ''} onChange={(event) => setRestrictedAssetForm((current) => ({ ...current, linked_debt_id: event.target.value ? Number(event.target.value) : null }))}>
+              <option value="">No asociada</option>
+              {data.debts.map((debt) => <option key={debt.id} value={debt.id}>{debt.label}</option>)}
+            </select>
+          </label>
+          <label className="span-2">
+            Condicion de liberacion
+            <input value={restrictedAssetForm.release_condition} onChange={(event) => setRestrictedAssetForm((current) => ({ ...current, release_condition: event.target.value }))} placeholder="Ej. se libera al saldar prestamo cooperativa" />
+          </label>
+          <label className="checkbox-row span-2">
+            <input type="checkbox" checked={restrictedAssetForm.active} onChange={(event) => setRestrictedAssetForm((current) => ({ ...current, active: event.target.checked }))} /> Activo
+          </label>
+          <label className="span-2">
+            Notas
+            <textarea rows={2} value={restrictedAssetForm.notes} onChange={(event) => setRestrictedAssetForm((current) => ({ ...current, notes: event.target.value }))} />
+          </label>
+          <div className="span-2 action-row">
+            <button type="submit" disabled={saving || !canEditData}>{editingRestrictedAssetId ? 'Actualizar activo restringido' : 'Agregar activo restringido'}</button>
+            {editingRestrictedAssetId ? <button type="button" className="ghost" onClick={() => { setEditingRestrictedAssetId(null); setRestrictedAssetForm(emptyRestrictedAsset()) }}>Cancelar</button> : null}
+          </div>
+        </form>
+        <div className="list-stack">
+          {data.restricted_assets.map((item) => (
+            <article key={item.id} className="list-card debt-card">
+              <div className="list-leading list-leading-top debt-card-main">
+                <VisualBadge iconToken="savings" colorToken={item.availability_status === 'restricted' ? 'gold' : 'emerald'} />
+                <div className="debt-card-copy">
+                  <div className="debt-card-head">
+                    <div>
+                      <strong>{item.label}</strong>
+                      <p>{item.institution || 'Sin institucion'} · {item.currency}</p>
+                    </div>
+                    <div className="debt-kpi-grid">
+                      <div className="debt-kpi">
+                        <span>Monto</span>
+                        <strong>{currency(item.balance_amount)}</strong>
+                      </div>
+                      <div className="debt-kpi">
+                        <span>Estado</span>
+                        <strong>{item.availability_status === 'restricted' ? 'Bloqueado' : 'Liberado'}</strong>
+                      </div>
+                      <div className="debt-kpi">
+                        <span>Deuda ligada</span>
+                        <strong>{data.debts.find((debt) => debt.id === item.linked_debt_id)?.label ?? 'Ninguna'}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="debt-chip-row">
+                    <span className={`debt-chip ${item.availability_status === 'restricted' ? 'alert' : 'ok'}`}>{item.availability_status === 'restricted' ? 'No disponible para presupuesto' : 'Disponible pero no es ingreso'}</span>
+                  </div>
+                  {item.release_condition ? <p className="debt-priority-copy">Se libera cuando: {item.release_condition}</p> : null}
+                  {item.notes ? <p className="debt-priority-copy">{item.notes}</p> : null}
+                </div>
+              </div>
+              <div className="list-actions">
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEditRestrictedAsset(item)}>Editar</button>
+                <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDeleteRestrictedAsset(item.id)}>Borrar</button>
               </div>
             </article>
           ))}
@@ -3101,7 +3296,7 @@ function SettingsTab({
   const canUseDevBackup = canEditData && data.current_username === 'mjk'
 
   return (
-    <section className="settings-grid">
+    <section className="settings-grid settings-masonry">
       <Panel title="Paletas">
         <div className="theme-grid">
           {palettes.map((palette) => (

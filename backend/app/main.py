@@ -17,7 +17,7 @@ from starlette.background import BackgroundTask
 
 from .database import Database, UserRecord
 from .importer import import_flutter_database
-from .schemas import AdminBootstrapRequest, AuthStatus, CategoryConfigInput, CreditCardCreate, CreditCardStatementCreate, Debt, DebtBalanceUpdateCreate, DebtCreate, EmergencyFundPreferenceUpdate, FixedIncomeSourceCreate, FlutterImportSummary, InitialSetupPayload, LoginRequest, LoginResponse, MonthCloseSnapshot, ObligationCreate, OwnerPanelResponse, PasswordChangeRequest, TagConfigInput, ThemePreferenceUpdate, TransactionCreate, UserAccessUpdateRequest, UserCreateRequest
+from .schemas import AdminBootstrapRequest, AuthStatus, CategoryConfigInput, CreditCardCreate, CreditCardStatementCreate, Debt, DebtBalanceUpdateCreate, DebtCreate, EmergencyFundPreferenceUpdate, FixedIncomeSourceCreate, FlutterImportSummary, InitialSetupPayload, LoginRequest, LoginResponse, MonthCloseSnapshot, ObligationCreate, OwnerPanelResponse, PasswordChangeRequest, RestrictedAsset, RestrictedAssetCreate, TagConfigInput, ThemePreferenceUpdate, TransactionCreate, UserAccessUpdateRequest, UserCreateRequest
 from .services import FinancialSnapshot, build_bootstrap, build_month_close_snapshot, suggest_income_allocation
 
 
@@ -114,11 +114,12 @@ def current_state(user_id: int):
     credit_cards = database.list_credit_cards(user_id)
     credit_card_statements = database.list_credit_card_statements(user_id)
     debts = database.list_debts(user_id)
+    restricted_assets = database.list_restricted_assets(user_id)
     month_close_snapshots = database.list_month_close_snapshots(user_id)
     transactions = database.list_transactions(user_id)
     categories = database.list_categories(user_id)
     tags = database.list_tags(user_id)
-    return fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, month_close_snapshots, transactions, categories, tags
+    return fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, restricted_assets, month_close_snapshots, transactions, categories, tags
 
 
 def require_auth(x_session_token: str | None = Header(default=None)) -> UserRecord:
@@ -271,7 +272,7 @@ def bootstrap(user: UserRecord = Depends(require_app_user)):
 
 @app.get('/api/suggestions/income')
 def income_suggestion(amount: float, user: UserRecord = Depends(require_app_user)):
-    fixed_income_sources, obligations, _, _, _, _, transactions, _, _ = current_state(user.id)
+    fixed_income_sources, obligations, _, _, _, _, _, transactions, _, _ = current_state(user.id)
     snapshot = FinancialSnapshot(fixed_income_expected=sum(item.amount for item in fixed_income_sources if item.active), income_reported=sum(item.amount for item in transactions if item.kind == 'ingreso'), pending_obligations=sum(item.amount for item in obligations if item.status != 'Cubierto'))
     return suggest_income_allocation(amount, snapshot)
 
@@ -387,6 +388,34 @@ def create_debt_balance_update(item_id: int, payload: DebtBalanceUpdateCreate, u
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get('/api/restricted-assets', response_model=list[RestrictedAsset])
+def list_restricted_assets(user: UserRecord = Depends(require_app_user)):
+    return database.list_restricted_assets(user.id)
+
+
+@app.post('/api/restricted-assets', response_model=RestrictedAsset)
+def create_restricted_asset(payload: RestrictedAssetCreate, user: UserRecord = Depends(require_editor)):
+    item = database.create_restricted_asset(user.id, payload.model_dump())
+    database.record_audit(user, 'create_restricted_asset', 'restricted_asset', item.label, f'Activo restringido registrado por {item.balance_amount:.2f}.')
+    return item
+
+
+@app.put('/api/restricted-assets/{item_id}', response_model=RestrictedAsset)
+def update_restricted_asset(item_id: int, payload: RestrictedAssetCreate, user: UserRecord = Depends(require_editor)):
+    try:
+        item = database.update_restricted_asset(user.id, item_id, payload.model_dump())
+        database.record_audit(user, 'update_restricted_asset', 'restricted_asset', item.label, f'Activo restringido actualizado con estado {item.availability_status}.')
+        return item
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete('/api/restricted-assets/{item_id}', status_code=204)
+def delete_restricted_asset(item_id: int, user: UserRecord = Depends(require_editor)):
+    database.delete_restricted_asset(user.id, item_id)
+    database.record_audit(user, 'delete_restricted_asset', 'restricted_asset', str(item_id), 'Activo restringido eliminado.')
+
+
 @app.delete('/api/debts/{item_id}', status_code=204)
 def delete_debt(item_id: int, user: UserRecord = Depends(require_editor)):
     database.delete_debt(user.id, item_id)
@@ -400,15 +429,15 @@ def list_month_close_snapshots(user: UserRecord = Depends(require_app_user)):
 
 @app.post('/api/month-close/current/preview', response_model=MonthCloseSnapshot)
 def preview_current_month_close(user: UserRecord = Depends(require_editor)):
-    fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, _, transactions, categories, _ = current_state(user.id)
-    payload = build_month_close_snapshot(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories, database.get_emergency_fund_months(user.id))
+    fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, restricted_assets, _, transactions, categories, _ = current_state(user.id)
+    payload = build_month_close_snapshot(fixed_income_sources, obligations, debts, restricted_assets, credit_cards, credit_card_statements, transactions, categories, database.get_emergency_fund_months(user.id))
     return MonthCloseSnapshot(id=0, is_preview=True, **payload)
 
 
 @app.post('/api/month-close/current', response_model=MonthCloseSnapshot)
 def generate_current_month_close(user: UserRecord = Depends(require_editor)):
-    fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, _, transactions, categories, _ = current_state(user.id)
-    payload = build_month_close_snapshot(fixed_income_sources, obligations, debts, credit_cards, credit_card_statements, transactions, categories, database.get_emergency_fund_months(user.id))
+    fixed_income_sources, obligations, credit_cards, credit_card_statements, debts, restricted_assets, _, transactions, categories, _ = current_state(user.id)
+    payload = build_month_close_snapshot(fixed_income_sources, obligations, debts, restricted_assets, credit_cards, credit_card_statements, transactions, categories, database.get_emergency_fund_months(user.id))
     existing_snapshot = database.get_month_close_snapshot(user.id, payload['period_year'], payload['period_month'])
     if existing_snapshot is not None:
         raise HTTPException(status_code=409, detail='Ya existe un cierre oficial para este mes. Usa el preview para probar o espera al siguiente periodo.')

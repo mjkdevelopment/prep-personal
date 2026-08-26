@@ -491,6 +491,84 @@ def test_debt_priority_uses_interest_when_available() -> None:
     assert 'tasa anual equivalente' in dashboard['debt_priority_reason']
 
 
+def test_fixed_principal_debt_mode_exposes_operational_estimate() -> None:
+    headers = ensure_app_headers('debtprincipal', '1234')
+
+    response = client.post(
+        '/api/debts',
+        json={
+            'label': 'Cooperativa garantia',
+            'lender': 'Cooperativa',
+            'balance_amount': 857785.88,
+            'monthly_payment_amount': 21658.67,
+            'currency': 'DOP',
+            'payment_day': 17,
+            'interest_rate_percent': None,
+            'interest_rate_period': None,
+            'amortization_mode': 'fixed_principal',
+            'fixed_principal_payment_amount': 15998.33,
+            'allow_extra_payment': True,
+            'active': True,
+            'notes': 'Capital fijo visible en estado de cuenta',
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['amortization_mode'] == 'fixed_principal'
+    assert payload['fixed_principal_payment_amount'] == 15998.33
+    assert payload['estimated_next_balance_amount'] == 841787.55
+
+
+def test_restricted_asset_is_visible_but_not_counted_as_income() -> None:
+    headers = ensure_app_headers('guaranteeuser', '1234')
+
+    setup = client.post(
+        '/api/setup/complete',
+        json={
+            'fixed_income_sources': [
+                {
+                    'label': 'Nomina base',
+                    'amount': 10000,
+                    'cadence': 'monthly',
+                    'expected_day': 30,
+                    'expected_weekday': None,
+                    'wallet': 'Banco',
+                    'active': True,
+                }
+            ],
+            'obligations': [],
+        },
+        headers=headers,
+    )
+    assert setup.status_code == 200
+
+    asset = client.post(
+        '/api/restricted-assets',
+        json={
+            'label': 'Garantia cooperativa',
+            'institution': 'Cooperativa',
+            'balance_amount': 1000000,
+            'currency': 'DOP',
+            'availability_status': 'restricted',
+            'linked_debt_id': None,
+            'release_condition': 'Se libera al saldar el prestamo',
+            'notes': 'Ahorro dado en garantia',
+            'active': True,
+        },
+        headers=headers,
+    )
+    assert asset.status_code == 200
+
+    bootstrap = client.get('/api/bootstrap', headers=headers)
+    assert bootstrap.status_code == 200
+    payload = bootstrap.json()
+    assert payload['dashboard']['restricted_assets_total'] == 1000000
+    assert payload['dashboard']['available_restricted_assets_total'] == 0
+    assert payload['dashboard']['income_reported_this_month'] == 0
+    assert len(payload['restricted_assets']) == 1
+
+
 def test_complete_and_reset_setup_flow() -> None:
     headers = ensure_app_headers('setupuser', '1234')
     response = client.post(

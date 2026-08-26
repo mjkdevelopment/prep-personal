@@ -228,6 +228,8 @@ class DebtBase(BaseModel):
     payment_day: Optional[int] = Field(default=None, ge=1, le=31)
     interest_rate_percent: Optional[float] = Field(default=None, ge=0)
     interest_rate_period: Optional[Literal['monthly', 'annual']] = None
+    amortization_mode: Literal['reported_balance', 'fixed_principal'] = 'reported_balance'
+    fixed_principal_payment_amount: Optional[float] = Field(default=None, ge=0)
     allow_extra_payment: bool = True
     active: bool = True
     notes: str = ''
@@ -243,6 +245,7 @@ class Debt(DebtBase):
     balance_source: Literal['manual', 'reported'] = 'manual'
     balance_update_count: int = 0
     balance_update_stale: bool = False
+    estimated_next_balance_amount: Optional[float] = None
     priority_score: float = 0
     priority_reason: str = ''
     latest_balance_note: str = ''
@@ -262,6 +265,26 @@ class DebtBalanceUpdateCreate(DebtBalanceUpdateBase):
 class DebtBalanceUpdate(DebtBalanceUpdateBase):
     id: int
     debt_id: int
+
+
+class RestrictedAssetBase(BaseModel):
+    label: str = Field(min_length=1)
+    institution: str = ''
+    balance_amount: float = Field(ge=0)
+    currency: str = Field(min_length=1, default='DOP')
+    availability_status: Literal['restricted', 'available'] = 'restricted'
+    linked_debt_id: Optional[int] = None
+    release_condition: str = ''
+    notes: str = ''
+    active: bool = True
+
+
+class RestrictedAssetCreate(RestrictedAssetBase):
+    pass
+
+
+class RestrictedAsset(RestrictedAssetBase):
+    id: int
 
 
 class MonthCloseSnapshot(BaseModel):
@@ -358,6 +381,8 @@ class DashboardSummary(BaseModel):
     debt_priority_label: str
     debt_priority_reason: str
     stale_debt_update_count: int
+    restricted_assets_total: float
+    available_restricted_assets_total: float
     recommended_free_margin_destination: str
     goals_target: float
     goals_reserved: float
@@ -399,6 +424,7 @@ class BootstrapResponse(BaseModel):
     credit_cards: list[CreditCard]
     credit_card_statements: list[CreditCardStatement]
     debts: list[Debt]
+    restricted_assets: list[RestrictedAsset]
     month_close_snapshots: list[MonthCloseSnapshot]
     transactions: list[Transaction]
     categories: list[CategoryConfig]

@@ -96,6 +96,8 @@ export interface Debt {
   payment_day: number | null
   interest_rate_percent: number | null
   interest_rate_period: 'monthly' | 'annual' | null
+  amortization_mode: 'reported_balance' | 'fixed_principal'
+  fixed_principal_payment_amount: number | null
   allow_extra_payment: boolean
   active: boolean
   notes: string
@@ -103,6 +105,7 @@ export interface Debt {
   balance_source: 'manual' | 'reported'
   balance_update_count: number
   balance_update_stale: boolean
+  estimated_next_balance_amount: number | null
   priority_score: number
   priority_reason: string
   latest_balance_note: string
@@ -115,6 +118,19 @@ export interface DebtBalanceUpdate {
   balance_amount: number
   reported_at_iso: string | null
   notes: string
+}
+
+export interface RestrictedAsset {
+  id: number
+  label: string
+  institution: string
+  balance_amount: number
+  currency: string
+  availability_status: 'restricted' | 'available'
+  linked_debt_id: number | null
+  release_condition: string
+  notes: string
+  active: boolean
 }
 
 export interface MonthCloseSnapshot {
@@ -252,6 +268,8 @@ export interface DashboardSummary {
   debt_priority_label: string
   debt_priority_reason: string
   stale_debt_update_count: number
+  restricted_assets_total: number
+  available_restricted_assets_total: number
   recommended_free_margin_destination: string
   goals_target: number
   goals_reserved: number
@@ -293,6 +311,7 @@ export interface BootstrapResponse {
   credit_cards: CreditCard[]
   credit_card_statements: CreditCardStatement[]
   debts: Debt[]
+  restricted_assets: RestrictedAsset[]
   month_close_snapshots: MonthCloseSnapshot[]
   transactions: Transaction[]
   categories: CategoryConfig[]
@@ -440,6 +459,8 @@ export interface DebtInput {
   payment_day: number | null
   interest_rate_percent: number | null
   interest_rate_period: 'monthly' | 'annual' | null
+  amortization_mode: 'reported_balance' | 'fixed_principal'
+  fixed_principal_payment_amount: number | null
   allow_extra_payment: boolean
   active: boolean
   notes: string
@@ -449,4 +470,16 @@ export interface DebtBalanceUpdateInput {
   balance_amount: number
   reported_at_iso: string
   notes: string
+}
+
+export interface RestrictedAssetInput {
+  label: string
+  institution: string
+  balance_amount: number
+  currency: string
+  availability_status: 'restricted' | 'available'
+  linked_debt_id: number | null
+  release_condition: string
+  notes: string
+  active: boolean
 }

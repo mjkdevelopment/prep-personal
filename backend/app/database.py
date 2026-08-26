@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterator
 
 from .defaults import DEFAULT_CATEGORIES, DEFAULT_TAGS
-from .schemas import AuditEvent, CategoryConfig, CreditCard, CreditCardStatement, CreditCardStatementItem, Debt, DebtBalanceUpdate, FixedIncomeSource, MonthCloseSnapshot, Obligation, TagConfig, Transaction, UserRole, UserSummary
+from .schemas import AuditEvent, CategoryConfig, CreditCard, CreditCardStatement, CreditCardStatementItem, Debt, DebtBalanceUpdate, FixedIncomeSource, MonthCloseSnapshot, Obligation, RestrictedAsset, TagConfig, Transaction, UserRole, UserSummary
 
 
 @dataclass
@@ -71,8 +71,9 @@ class Database:
             connection.execute('CREATE TABLE IF NOT EXISTS credit_cards(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, label TEXT NOT NULL, last4 TEXT NOT NULL, closing_day INTEGER NOT NULL, due_day INTEGER NOT NULL, limit_amount REAL NOT NULL, active INTEGER NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS credit_card_statements(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, credit_card_id INTEGER NOT NULL, statement_date_iso TEXT NOT NULL, due_date_iso TEXT NOT NULL, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, statement_amount REAL NOT NULL, notes TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS credit_card_statement_items(id INTEGER PRIMARY KEY AUTOINCREMENT, statement_id INTEGER NOT NULL, obligation_id INTEGER NOT NULL, amount REAL NOT NULL)')
-            connection.execute('CREATE TABLE IF NOT EXISTS debts(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, label TEXT NOT NULL, lender TEXT NOT NULL, balance_amount REAL NOT NULL, monthly_payment_amount REAL NOT NULL, currency TEXT NOT NULL, payment_day INTEGER, interest_rate_percent REAL, interest_rate_period TEXT, allow_extra_payment INTEGER NOT NULL, active INTEGER NOT NULL, notes TEXT NOT NULL)')
+            connection.execute('CREATE TABLE IF NOT EXISTS debts(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, label TEXT NOT NULL, lender TEXT NOT NULL, balance_amount REAL NOT NULL, monthly_payment_amount REAL NOT NULL, currency TEXT NOT NULL, payment_day INTEGER, interest_rate_percent REAL, interest_rate_period TEXT, amortization_mode TEXT NOT NULL DEFAULT \'reported_balance\', fixed_principal_payment_amount REAL, allow_extra_payment INTEGER NOT NULL, active INTEGER NOT NULL, notes TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS debt_balance_updates(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, debt_id INTEGER NOT NULL, balance_amount REAL NOT NULL, reported_at_iso TEXT NOT NULL, notes TEXT NOT NULL)')
+            connection.execute('CREATE TABLE IF NOT EXISTS restricted_assets(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, label TEXT NOT NULL, institution TEXT NOT NULL, balance_amount REAL NOT NULL, currency TEXT NOT NULL, availability_status TEXT NOT NULL, linked_debt_id INTEGER, release_condition TEXT NOT NULL, notes TEXT NOT NULL, active INTEGER NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS month_close_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, closed_at_iso TEXT NOT NULL, income_expected REAL NOT NULL, income_reported REAL NOT NULL, income_delta REAL NOT NULL, income_delta_percent REAL NOT NULL, obligations_target REAL NOT NULL, obligations_reserved REAL NOT NULL, pending_obligations REAL NOT NULL, cash_on_hand REAL NOT NULL, structural_margin REAL NOT NULL, available_margin_now REAL NOT NULL, recommended_personal_remaining REAL NOT NULL, overdue_obligations_amount REAL NOT NULL DEFAULT 0, next_cycle_obligations_amount REAL NOT NULL DEFAULT 0, next_cycle_start_buffer REAL NOT NULL DEFAULT 0, goals_shortfall_amount REAL NOT NULL DEFAULT 0, debt_payment_target REAL NOT NULL, debt_total_balance REAL NOT NULL, suggested_carryover_amount REAL NOT NULL, suggested_extra_debt_payment REAL NOT NULL, highlights_json TEXT NOT NULL, concerns_json TEXT NOT NULL, next_actions_json TEXT NOT NULL, UNIQUE(user_id, period_year, period_month))')
             connection.execute('CREATE TABLE IF NOT EXISTS app_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at_iso TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, theme_id TEXT NOT NULL, emergency_fund_months INTEGER NOT NULL DEFAULT 3, setup_complete INTEGER NOT NULL, is_admin INTEGER NOT NULL, created_at_iso TEXT NOT NULL, updated_at_iso TEXT NOT NULL)')
@@ -96,6 +97,8 @@ class Database:
             self._ensure_column(connection, 'users', 'created_by_user_id', 'INTEGER')
             self._ensure_column(connection, 'debts', 'interest_rate_percent', 'REAL')
             self._ensure_column(connection, 'debts', 'interest_rate_period', 'TEXT')
+            self._ensure_column(connection, 'debts', 'amortization_mode', "TEXT NOT NULL DEFAULT 'reported_balance'")
+            self._ensure_column(connection, 'debts', 'fixed_principal_payment_amount', 'REAL')
             self._ensure_user_scoped_categories_table(connection)
             self._ensure_user_scoped_tags_table(connection)
             self._ensure_column(connection, 'month_close_snapshots', 'overdue_obligations_amount', 'REAL NOT NULL DEFAULT 0')
@@ -477,10 +480,15 @@ class Database:
             updates_by_debt.setdefault(update.debt_id, []).append(update)
         return [self._debt(row, updates_by_debt.get(int(row['id']), [])) for row in rows]
 
+    def list_restricted_assets(self, user_id: int) -> list[RestrictedAsset]:
+        with self.connect() as connection:
+            rows = connection.execute('SELECT * FROM restricted_assets WHERE user_id = ? ORDER BY active DESC, availability_status ASC, balance_amount DESC, id ASC', (user_id,)).fetchall()
+        return [self._restricted_asset(row) for row in rows]
+
     def create_debt(self, user_id: int, payload: dict) -> Debt:
         with self.connect() as connection:
             cursor = connection.execute(
-                'INSERT INTO debts(user_id, label, lender, balance_amount, monthly_payment_amount, currency, payment_day, interest_rate_percent, interest_rate_period, allow_extra_payment, active, notes) VALUES(:user_id, :label, :lender, :balance_amount, :monthly_payment_amount, :currency, :payment_day, :interest_rate_percent, :interest_rate_period, :allow_extra_payment, :active, :notes)',
+                'INSERT INTO debts(user_id, label, lender, balance_amount, monthly_payment_amount, currency, payment_day, interest_rate_percent, interest_rate_period, amortization_mode, fixed_principal_payment_amount, allow_extra_payment, active, notes) VALUES(:user_id, :label, :lender, :balance_amount, :monthly_payment_amount, :currency, :payment_day, :interest_rate_percent, :interest_rate_period, :amortization_mode, :fixed_principal_payment_amount, :allow_extra_payment, :active, :notes)',
                 {**payload, 'user_id': user_id, 'allow_extra_payment': 1 if payload.get('allow_extra_payment', True) else 0, 'active': 1 if payload.get('active', True) else 0},
             )
             connection.execute(
@@ -496,7 +504,7 @@ class Database:
             current_row = connection.execute('SELECT * FROM debts WHERE id = ? AND user_id = ? LIMIT 1', (item_id, user_id)).fetchone()
             current_updates = connection.execute('SELECT * FROM debt_balance_updates WHERE user_id = ? AND debt_id = ? ORDER BY id DESC', (user_id, item_id)).fetchall()
             connection.execute(
-                'UPDATE debts SET label = :label, lender = :lender, balance_amount = :balance_amount, monthly_payment_amount = :monthly_payment_amount, currency = :currency, payment_day = :payment_day, interest_rate_percent = :interest_rate_percent, interest_rate_period = :interest_rate_period, allow_extra_payment = :allow_extra_payment, active = :active, notes = :notes WHERE id = :id AND user_id = :user_id',
+                'UPDATE debts SET label = :label, lender = :lender, balance_amount = :balance_amount, monthly_payment_amount = :monthly_payment_amount, currency = :currency, payment_day = :payment_day, interest_rate_percent = :interest_rate_percent, interest_rate_period = :interest_rate_period, amortization_mode = :amortization_mode, fixed_principal_payment_amount = :fixed_principal_payment_amount, allow_extra_payment = :allow_extra_payment, active = :active, notes = :notes WHERE id = :id AND user_id = :user_id',
                 {**payload, 'id': item_id, 'user_id': user_id, 'allow_extra_payment': 1 if payload.get('allow_extra_payment', True) else 0, 'active': 1 if payload.get('active', True) else 0},
             )
             current_balance = float(current_updates[0]['balance_amount']) if current_updates else (float(current_row['balance_amount']) if current_row else 0)
@@ -510,6 +518,32 @@ class Database:
         if row is None:
             raise ValueError('Deuda no encontrada.')
         return self._debt(row, [self._debt_balance_update(update_row) for update_row in update_rows])
+
+    def create_restricted_asset(self, user_id: int, payload: dict) -> RestrictedAsset:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                'INSERT INTO restricted_assets(user_id, label, institution, balance_amount, currency, availability_status, linked_debt_id, release_condition, notes, active) VALUES(:user_id, :label, :institution, :balance_amount, :currency, :availability_status, :linked_debt_id, :release_condition, :notes, :active)',
+                {**payload, 'user_id': user_id, 'active': 1 if payload.get('active', True) else 0},
+            )
+            row = connection.execute('SELECT * FROM restricted_assets WHERE id = ? AND user_id = ?', (cursor.lastrowid, user_id)).fetchone()
+        if row is None:
+            raise ValueError('Activo restringido no encontrado.')
+        return self._restricted_asset(row)
+
+    def update_restricted_asset(self, user_id: int, item_id: int, payload: dict) -> RestrictedAsset:
+        with self.connect() as connection:
+            connection.execute(
+                'UPDATE restricted_assets SET label = :label, institution = :institution, balance_amount = :balance_amount, currency = :currency, availability_status = :availability_status, linked_debt_id = :linked_debt_id, release_condition = :release_condition, notes = :notes, active = :active WHERE id = :id AND user_id = :user_id',
+                {**payload, 'id': item_id, 'user_id': user_id, 'active': 1 if payload.get('active', True) else 0},
+            )
+            row = connection.execute('SELECT * FROM restricted_assets WHERE id = ? AND user_id = ?', (item_id, user_id)).fetchone()
+        if row is None:
+            raise ValueError('Activo restringido no encontrado.')
+        return self._restricted_asset(row)
+
+    def delete_restricted_asset(self, user_id: int, item_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute('DELETE FROM restricted_assets WHERE id = ? AND user_id = ?', (item_id, user_id))
 
     def create_debt_balance_update(self, user_id: int, debt_id: int, payload: dict) -> Debt:
         reported_at_iso = payload.get('reported_at_iso') or datetime.now().isoformat()
@@ -732,6 +766,7 @@ class Database:
             connection.execute('DELETE FROM month_close_snapshots WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM debt_balance_updates WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM debts WHERE user_id = ?', (user_id,))
+            connection.execute('DELETE FROM restricted_assets WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM credit_card_statement_items WHERE statement_id IN (SELECT id FROM credit_card_statements WHERE user_id = ?)', (user_id,))
             connection.execute('DELETE FROM credit_card_statements WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM credit_cards WHERE user_id = ?', (user_id,))
@@ -755,6 +790,7 @@ class Database:
             connection.execute('DELETE FROM month_close_snapshots WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM debt_balance_updates WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM debts WHERE user_id = ?', (user_id,))
+            connection.execute('DELETE FROM restricted_assets WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM credit_card_statement_items WHERE statement_id IN (SELECT id FROM credit_card_statements WHERE user_id = ?)', (user_id,))
             connection.execute('DELETE FROM credit_card_statements WHERE user_id = ?', (user_id,))
             connection.execute('DELETE FROM credit_cards WHERE user_id = ?', (user_id,))
@@ -784,8 +820,9 @@ class Database:
                 backup_connection.execute('CREATE TABLE credit_cards(id INTEGER PRIMARY KEY, label TEXT NOT NULL, last4 TEXT NOT NULL, closing_day INTEGER NOT NULL, due_day INTEGER NOT NULL, limit_amount REAL NOT NULL, active INTEGER NOT NULL)')
                 backup_connection.execute('CREATE TABLE credit_card_statements(id INTEGER PRIMARY KEY, credit_card_id INTEGER NOT NULL, statement_date_iso TEXT NOT NULL, due_date_iso TEXT NOT NULL, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, statement_amount REAL NOT NULL, notes TEXT NOT NULL)')
                 backup_connection.execute('CREATE TABLE credit_card_statement_items(id INTEGER PRIMARY KEY, statement_id INTEGER NOT NULL, obligation_id INTEGER NOT NULL, amount REAL NOT NULL)')
-                backup_connection.execute('CREATE TABLE debts(id INTEGER PRIMARY KEY, label TEXT NOT NULL, lender TEXT NOT NULL, balance_amount REAL NOT NULL, monthly_payment_amount REAL NOT NULL, currency TEXT NOT NULL, payment_day INTEGER, interest_rate_percent REAL, interest_rate_period TEXT, allow_extra_payment INTEGER NOT NULL, active INTEGER NOT NULL, notes TEXT NOT NULL)')
+                backup_connection.execute('CREATE TABLE debts(id INTEGER PRIMARY KEY, label TEXT NOT NULL, lender TEXT NOT NULL, balance_amount REAL NOT NULL, monthly_payment_amount REAL NOT NULL, currency TEXT NOT NULL, payment_day INTEGER, interest_rate_percent REAL, interest_rate_period TEXT, amortization_mode TEXT NOT NULL, fixed_principal_payment_amount REAL, allow_extra_payment INTEGER NOT NULL, active INTEGER NOT NULL, notes TEXT NOT NULL)')
                 backup_connection.execute('CREATE TABLE debt_balance_updates(id INTEGER PRIMARY KEY, debt_id INTEGER NOT NULL, balance_amount REAL NOT NULL, reported_at_iso TEXT NOT NULL, notes TEXT NOT NULL)')
+                backup_connection.execute('CREATE TABLE restricted_assets(id INTEGER PRIMARY KEY, label TEXT NOT NULL, institution TEXT NOT NULL, balance_amount REAL NOT NULL, currency TEXT NOT NULL, availability_status TEXT NOT NULL, linked_debt_id INTEGER, release_condition TEXT NOT NULL, notes TEXT NOT NULL, active INTEGER NOT NULL)')
                 backup_connection.execute('CREATE TABLE month_close_snapshots(id INTEGER PRIMARY KEY, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, closed_at_iso TEXT NOT NULL, income_expected REAL NOT NULL, income_reported REAL NOT NULL, income_delta REAL NOT NULL, income_delta_percent REAL NOT NULL, obligations_target REAL NOT NULL, obligations_reserved REAL NOT NULL, pending_obligations REAL NOT NULL, cash_on_hand REAL NOT NULL, structural_margin REAL NOT NULL, available_margin_now REAL NOT NULL, recommended_personal_remaining REAL NOT NULL, overdue_obligations_amount REAL NOT NULL, next_cycle_obligations_amount REAL NOT NULL, next_cycle_start_buffer REAL NOT NULL, goals_shortfall_amount REAL NOT NULL, debt_payment_target REAL NOT NULL, debt_total_balance REAL NOT NULL, suggested_carryover_amount REAL NOT NULL, suggested_extra_debt_payment REAL NOT NULL, highlights_json TEXT NOT NULL, concerns_json TEXT NOT NULL, next_actions_json TEXT NOT NULL)')
                 backup_connection.execute('CREATE TABLE categories(id TEXT PRIMARY KEY, label TEXT NOT NULL, scope TEXT NOT NULL, type TEXT NOT NULL, color_token TEXT NOT NULL, icon_token TEXT NOT NULL, active INTEGER NOT NULL)')
                 backup_connection.execute('CREATE TABLE tags(id TEXT PRIMARY KEY, label TEXT NOT NULL, color_token TEXT NOT NULL, active INTEGER NOT NULL, command_enabled INTEGER NOT NULL, preset_transaction_kind TEXT, preset_fixed_income_source_id INTEGER, preset_obligation_id INTEGER, preset_settlement_mode TEXT, preset_amount REAL, preset_wallet TEXT, preset_category TEXT, preset_recurring INTEGER)')
@@ -808,11 +845,15 @@ class Database:
                     (user_id,),
                 ).fetchall()
                 debt_rows = source_connection.execute(
-                    'SELECT id, label, lender, balance_amount, monthly_payment_amount, currency, payment_day, interest_rate_percent, interest_rate_period, allow_extra_payment, active, notes FROM debts WHERE user_id = ? ORDER BY id ASC',
+                    'SELECT id, label, lender, balance_amount, monthly_payment_amount, currency, payment_day, interest_rate_percent, interest_rate_period, amortization_mode, fixed_principal_payment_amount, allow_extra_payment, active, notes FROM debts WHERE user_id = ? ORDER BY id ASC',
                     (user_id,),
                 ).fetchall()
                 debt_balance_update_rows = source_connection.execute(
                     'SELECT id, debt_id, balance_amount, reported_at_iso, notes FROM debt_balance_updates WHERE user_id = ? ORDER BY reported_at_iso DESC, id DESC',
+                    (user_id,),
+                ).fetchall()
+                restricted_asset_rows = source_connection.execute(
+                    'SELECT id, label, institution, balance_amount, currency, availability_status, linked_debt_id, release_condition, notes, active FROM restricted_assets WHERE user_id = ? ORDER BY id ASC',
                     (user_id,),
                 ).fetchall()
                 statement_rows = source_connection.execute(
@@ -853,12 +894,16 @@ class Database:
                     [tuple(row) for row in credit_card_rows],
                 )
                 backup_connection.executemany(
-                    'INSERT INTO debts(id, label, lender, balance_amount, monthly_payment_amount, currency, payment_day, interest_rate_percent, interest_rate_period, allow_extra_payment, active, notes) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    'INSERT INTO debts(id, label, lender, balance_amount, monthly_payment_amount, currency, payment_day, interest_rate_percent, interest_rate_period, amortization_mode, fixed_principal_payment_amount, allow_extra_payment, active, notes) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     [tuple(row) for row in debt_rows],
                 )
                 backup_connection.executemany(
                     'INSERT INTO debt_balance_updates(id, debt_id, balance_amount, reported_at_iso, notes) VALUES(?, ?, ?, ?, ?)',
                     [tuple(row) for row in debt_balance_update_rows],
+                )
+                backup_connection.executemany(
+                    'INSERT INTO restricted_assets(id, label, institution, balance_amount, currency, availability_status, linked_debt_id, release_condition, notes, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [tuple(row) for row in restricted_asset_rows],
                 )
                 backup_connection.executemany(
                     'INSERT INTO credit_card_statements(id, credit_card_id, statement_date_iso, due_date_iso, period_year, period_month, statement_amount, notes) VALUES(?, ?, ?, ?, ?, ?, ?, ?)',
@@ -1037,6 +1082,9 @@ class Database:
         latest_balance = latest_update.balance_amount if latest_update else float(row['balance_amount'])
         latest_reported_at = latest_update.reported_at_iso if latest_update else None
         latest_note = latest_update.notes if latest_update else ''
+        estimated_next_balance_amount = None
+        if row['amortization_mode'] == 'fixed_principal' and row['fixed_principal_payment_amount'] is not None:
+            estimated_next_balance_amount = max(float(latest_balance) - float(row['fixed_principal_payment_amount']), 0)
         return Debt(
             id=row['id'],
             label=row['label'],
@@ -1047,6 +1095,8 @@ class Database:
             payment_day=row['payment_day'],
             interest_rate_percent=float(row['interest_rate_percent']) if row['interest_rate_percent'] is not None else None,
             interest_rate_period=str(row['interest_rate_period']) if row['interest_rate_period'] else None,
+            amortization_mode=str(row['amortization_mode'] or 'reported_balance'),
+            fixed_principal_payment_amount=float(row['fixed_principal_payment_amount']) if row['fixed_principal_payment_amount'] is not None else None,
             allow_extra_payment=bool(row['allow_extra_payment']),
             active=bool(row['active']),
             notes=row['notes'],
@@ -1054,10 +1104,26 @@ class Database:
             balance_source='reported' if latest_update else 'manual',
             balance_update_count=len(balance_updates),
             balance_update_stale=False,
+            estimated_next_balance_amount=estimated_next_balance_amount,
             priority_score=0,
             priority_reason='',
             latest_balance_note=latest_note,
             balance_updates=balance_updates,
+        )
+
+    @staticmethod
+    def _restricted_asset(row: sqlite3.Row) -> RestrictedAsset:
+        return RestrictedAsset(
+            id=int(row['id']),
+            label=str(row['label']),
+            institution=str(row['institution'] or ''),
+            balance_amount=float(row['balance_amount']),
+            currency=str(row['currency']),
+            availability_status=str(row['availability_status'] or 'restricted'),
+            linked_debt_id=int(row['linked_debt_id']) if row['linked_debt_id'] is not None else None,
+            release_condition=str(row['release_condition'] or ''),
+            notes=str(row['notes'] or ''),
+            active=bool(row['active']),
         )
 
     @staticmethod
