@@ -8,6 +8,7 @@ import {
   createCreditCard,
   createCreditCardStatement,
   createDebt,
+  createDebtBalanceUpdate,
   createUser,
   createFixedIncomeSource,
   createObligation,
@@ -58,6 +59,7 @@ import type {
   CreditCardStatement,
   CreditCardStatementInput,
   Debt,
+  DebtBalanceUpdateInput,
   DebtInput,
   FixedIncomeCadence,
   FixedIncomeSource,
@@ -92,6 +94,20 @@ const cardCycleDueDate = (statementDate: string, dueDay: number): string => {
   const nextMonth = new Date(base.getFullYear(), base.getMonth() + 1, 1)
   const lastDay = new Date(nextMonth.getFullYear(), nextMonth.getMonth() + 1, 0).getDate()
   return formatDateOnlyValue(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), Math.min(dueDay, lastDay)))
+}
+
+const debtRateCopy = (debt: Debt): string => {
+  if (debt.interest_rate_percent === null) {
+    return 'Tasa no registrada'
+  }
+  return `${debt.interest_rate_percent}% ${debt.interest_rate_period === 'monthly' ? 'mensual' : 'anual'}`
+}
+
+const debtFreshnessCopy = (debt: Debt): string => {
+  if (!debt.last_balance_reported_at_iso) {
+    return 'Sin saldo confirmado'
+  }
+  return `Actualizado ${debt.last_balance_reported_at_iso.slice(0, 10)}`
 }
 
 const appTabs: Array<{ id: AppTab; label: string }> = [
@@ -251,8 +267,16 @@ const emptyDebt = (): DebtInput => ({
   monthly_payment_amount: 0,
   currency: 'DOP',
   payment_day: null,
+  interest_rate_percent: null,
+  interest_rate_period: null,
   allow_extra_payment: true,
   active: true,
+  notes: '',
+})
+
+const emptyDebtBalanceUpdate = (): DebtBalanceUpdateInput => ({
+  balance_amount: 0,
+  reported_at_iso: formatDateOnlyValue(new Date()),
   notes: '',
 })
 
@@ -553,6 +577,8 @@ function App() {
   const [creditCardForm, setCreditCardForm] = useState<CreditCardInput>(emptyCreditCard())
   const [creditCardStatementForm, setCreditCardStatementForm] = useState<CreditCardStatementInput>(emptyCreditCardStatement())
   const [debtForm, setDebtForm] = useState<DebtInput>(emptyDebt())
+  const [debtBalanceUpdateForm, setDebtBalanceUpdateForm] = useState<DebtBalanceUpdateInput>(emptyDebtBalanceUpdate())
+  const [activeDebtBalanceUpdateId, setActiveDebtBalanceUpdateId] = useState<number | null>(null)
   const [categoryForm, setCategoryForm] = useState<CategoryConfigInput>(emptyCategory())
   const [tagForm, setTagForm] = useState<TagConfigInput>(emptyTag())
   const [tagCommandInput, setTagCommandInput] = useState('')
@@ -967,6 +993,23 @@ function App() {
     }
   }
 
+  const handleDebtBalanceUpdateSubmit = async (debtId: number) => {
+    setSaving(true)
+    try {
+      await createDebtBalanceUpdate(debtId, {
+        ...debtBalanceUpdateForm,
+        reported_at_iso: `${debtBalanceUpdateForm.reported_at_iso}T12:00:00`,
+      })
+      setDebtBalanceUpdateForm(emptyDebtBalanceUpdate())
+      setActiveDebtBalanceUpdateId(null)
+      await load()
+    } catch (submitError) {
+      setError(resolveErrorMessage(submitError, 'No se pudo actualizar el saldo confirmado de la deuda.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleCategorySubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSaving(true)
@@ -1359,8 +1402,13 @@ function App() {
           }}
           onEditDebt={(item) => {
             setEditingDebtId(item.id)
-            setDebtForm({ label: item.label, lender: item.lender, balance_amount: item.balance_amount, monthly_payment_amount: item.monthly_payment_amount, currency: item.currency, payment_day: item.payment_day, allow_extra_payment: item.allow_extra_payment, active: item.active, notes: item.notes })
+            setDebtForm({ label: item.label, lender: item.lender, balance_amount: item.balance_amount, monthly_payment_amount: item.monthly_payment_amount, currency: item.currency, payment_day: item.payment_day, interest_rate_percent: item.interest_rate_percent, interest_rate_period: item.interest_rate_period, allow_extra_payment: item.allow_extra_payment, active: item.active, notes: item.notes })
           }}
+          activeDebtBalanceUpdateId={activeDebtBalanceUpdateId}
+          setActiveDebtBalanceUpdateId={setActiveDebtBalanceUpdateId}
+          debtBalanceUpdateForm={debtBalanceUpdateForm}
+          setDebtBalanceUpdateForm={setDebtBalanceUpdateForm}
+          onDebtBalanceUpdateSubmit={handleDebtBalanceUpdateSubmit}
           onDeleteFixedIncome={async (id) => {
             await deleteFixedIncomeSource(id)
             await load()
@@ -2012,6 +2060,7 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
             <article className="decision-card recommended">
               <span className="metric-kicker">Prioridad sugerida</span>
               <strong>{data.dashboard.recommended_free_margin_destination}</strong>
+              {data.dashboard.debt_priority_label ? <p>Deuda foco: {data.dashboard.debt_priority_label}. {data.dashboard.debt_priority_reason}</p> : null}
             </article>
             <article className="decision-card">
               <span className="metric-kicker">Fijos reales</span>
@@ -2021,7 +2070,7 @@ function DashboardTab({ data }: { data: BootstrapResponse }) {
             <article className="decision-card">
               <span className="metric-kicker">Fondo de seguridad</span>
               <strong>{currency(data.dashboard.emergency_fund_current)}</strong>
-              <p>Meta sugerida: {currency(data.dashboard.emergency_fund_target)}. Faltan {currency(data.dashboard.emergency_fund_gap)}.</p>
+              <p>Meta sugerida: {currency(data.dashboard.emergency_fund_target)}. Faltan {currency(data.dashboard.emergency_fund_gap)}.{data.dashboard.stale_debt_update_count > 0 ? ` Hay ${data.dashboard.stale_debt_update_count} deuda(s) sin saldo confirmado reciente.` : ''}</p>
             </article>
             <article className="decision-card">
               <span className="metric-kicker">Inversion habilitada</span>
@@ -2436,6 +2485,10 @@ function BaseTab({
   setCreditCardStatementForm,
   debtForm,
   setDebtForm,
+  activeDebtBalanceUpdateId,
+  setActiveDebtBalanceUpdateId,
+  debtBalanceUpdateForm,
+  setDebtBalanceUpdateForm,
   editingFixedIncomeId,
   editingObligationId,
   editingCreditCardId,
@@ -2447,6 +2500,7 @@ function BaseTab({
   onCreditCardSubmit,
   onCreditCardStatementSubmit,
   onDebtSubmit,
+  onDebtBalanceUpdateSubmit,
   onEditFixedIncome,
   onEditObligation,
   onEditCreditCard,
@@ -2471,6 +2525,10 @@ function BaseTab({
   setCreditCardStatementForm: Dispatch<SetStateAction<CreditCardStatementInput>>
   debtForm: DebtInput
   setDebtForm: Dispatch<SetStateAction<DebtInput>>
+  activeDebtBalanceUpdateId: number | null
+  setActiveDebtBalanceUpdateId: Dispatch<SetStateAction<number | null>>
+  debtBalanceUpdateForm: DebtBalanceUpdateInput
+  setDebtBalanceUpdateForm: Dispatch<SetStateAction<DebtBalanceUpdateInput>>
   editingFixedIncomeId: number | null
   editingObligationId: number | null
   editingCreditCardId: number | null
@@ -2482,6 +2540,7 @@ function BaseTab({
   onCreditCardSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onCreditCardStatementSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onDebtSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onDebtBalanceUpdateSubmit: (debtId: number) => Promise<void>
   onEditFixedIncome: (item: FixedIncomeSource) => void
   onEditObligation: (item: Obligation) => void
   onEditCreditCard: (item: CreditCard) => void
@@ -2703,6 +2762,25 @@ function BaseTab({
         </div>
       </Panel>
       <Panel title="Deudas reales" subtitle="Saldo, cuota y espacio para abonos extra.">
+        {data.debts.length > 0 ? (
+          <div className="debt-overview-strip">
+            <article className="debt-overview-metric">
+              <span className="metric-kicker">Saldo vivo</span>
+              <strong>{currency(data.dashboard.debt_total_balance)}</strong>
+              <p>{data.debts.filter((item) => item.active).length} deuda(s) activa(s)</p>
+            </article>
+            <article className="debt-overview-metric featured">
+              <span className="metric-kicker">Foco sugerido</span>
+              <strong>{data.dashboard.debt_priority_label || 'Sin prioridad'}</strong>
+              <p>{data.dashboard.debt_priority_reason || 'Registra deudas activas para priorizar con criterio.'}</p>
+            </article>
+            <article className="debt-overview-metric">
+              <span className="metric-kicker">Control de saldos</span>
+              <strong>{data.dashboard.stale_debt_update_count}</strong>
+              <p>{data.dashboard.stale_debt_update_count > 0 ? 'Necesitan confirmacion reciente.' : 'Todos los saldos lucen recientes.'}</p>
+            </article>
+          </div>
+        ) : null}
         <form className="form-grid dynamic-form compact" onSubmit={onDebtSubmit}>
           <label>
             Etiqueta
@@ -2731,6 +2809,18 @@ function BaseTab({
             Dia de pago
             <input type="number" min="1" max="31" value={debtForm.payment_day ?? ''} onChange={(event) => setDebtForm((current) => ({ ...current, payment_day: event.target.value ? clampDayOfMonth(Number(event.target.value)) : null }))} />
           </label>
+          <label>
+            Tasa de interes
+            <input type="number" min="0" step="0.01" value={debtForm.interest_rate_percent ?? ''} onChange={(event) => setDebtForm((current) => ({ ...current, interest_rate_percent: event.target.value ? Number(event.target.value) : null }))} placeholder="Opcional" />
+          </label>
+          <label>
+            Periodo de tasa
+            <select value={debtForm.interest_rate_period ?? ''} onChange={(event) => setDebtForm((current) => ({ ...current, interest_rate_period: event.target.value ? event.target.value as 'monthly' | 'annual' : null }))}>
+              <option value="">No disponible</option>
+              <option value="monthly">Mensual</option>
+              <option value="annual">Anual</option>
+            </select>
+          </label>
           <label className="checkbox-row span-2">
             <input type="checkbox" checked={debtForm.allow_extra_payment} onChange={(event) => setDebtForm((current) => ({ ...current, allow_extra_payment: event.target.checked }))} /> Permite abonos extra sin penalidad
           </label>
@@ -2747,16 +2837,86 @@ function BaseTab({
         </form>
         <div className="list-stack">
           {data.debts.map((item) => (
-            <article key={item.id} className="list-card">
-              <div className="list-leading list-leading-top">
+            <article key={item.id} className="list-card debt-card">
+              <div className="list-leading list-leading-top debt-card-main">
                 <VisualBadge iconToken="scale" colorToken={item.active ? 'plum' : 'stone'} />
-                <div>
-                  <strong>{item.label}</strong>
-                  <p>{item.lender || 'Sin acreedor'} · cuota {currency(item.monthly_payment_amount)} · saldo {currency(item.balance_amount)} {item.currency}</p>
-                  <small>{item.allow_extra_payment ? 'Permite abonos extra' : 'Sin abonos extra definidos'}{item.payment_day ? ` · pago dia ${item.payment_day}` : ''}</small>
+                <div className="debt-card-copy">
+                  <div className="debt-card-head">
+                    <div>
+                      <strong>{item.label}</strong>
+                      <p>{item.lender || 'Sin acreedor'} · {item.currency}</p>
+                    </div>
+                    <div className="debt-kpi-grid">
+                      <div className="debt-kpi">
+                        <span>Saldo oficial</span>
+                        <strong>{currency(item.balance_amount)}</strong>
+                      </div>
+                      <div className="debt-kpi">
+                        <span>Cuota mensual</span>
+                        <strong>{currency(item.monthly_payment_amount)}</strong>
+                      </div>
+                      <div className="debt-kpi">
+                        <span>Historial</span>
+                        <strong>{item.balance_update_count}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="debt-chip-row">
+                    <span className="debt-chip">{item.balance_source === 'reported' ? 'Saldo confirmado' : 'Saldo manual'}</span>
+                    <span className={`debt-chip ${item.balance_update_stale ? 'alert' : 'ok'}`}>{debtFreshnessCopy(item)}</span>
+                    <span className="debt-chip">{debtRateCopy(item)}</span>
+                    {item.allow_extra_payment ? <span className="debt-chip ok">Permite abonos extra</span> : null}
+                    {item.payment_day ? <span className="debt-chip">Pago dia {item.payment_day}</span> : null}
+                  </div>
+                  {item.priority_reason ? <p className="debt-priority-copy">{item.priority_reason}</p> : null}
+                  <div className="debt-history-block">
+                    <div className="debt-history-head">
+                      <span className="metric-kicker">Ultimos movimientos reportados</span>
+                      <small>{item.balance_update_count > 3 ? `Mostrando 3 de ${item.balance_update_count}` : 'Historial corto visible'}</small>
+                    </div>
+                    <div className="debt-history-list">
+                      {item.balance_updates.slice(0, 3).map((update, index) => (
+                        <article key={update.id} className={`debt-history-item ${index === 0 ? 'current' : ''}`}>
+                          <div>
+                            <strong>{currency(update.balance_amount)}</strong>
+                            <p>{update.reported_at_iso ? update.reported_at_iso.slice(0, 10) : 'Sin fecha'}</p>
+                          </div>
+                          <small>{update.notes || 'Sin nota adicional'}</small>
+                        </article>
+                      ))}
+                    </div>
+                    {item.latest_balance_note ? <p className="debt-history-footnote">Ultima referencia: {item.latest_balance_note}</p> : null}
+                  </div>
+                  {activeDebtBalanceUpdateId === item.id ? (
+                    <div className="debt-update-panel top-gap">
+                      <div className="debt-update-head">
+                        <span className="metric-kicker">Reportar saldo oficial</span>
+                        <p>Registra el monto que ves en el banco o cooperativa. Ese valor reemplaza la lectura anterior.</p>
+                      </div>
+                      <div className="form-grid dynamic-form compact debt-update-form">
+                        <label>
+                          Nuevo saldo confirmado
+                          <input type="number" min="0" step="0.01" value={debtBalanceUpdateForm.balance_amount || ''} onChange={(event) => setDebtBalanceUpdateForm((current) => ({ ...current, balance_amount: Number(event.target.value) }))} />
+                        </label>
+                        <label>
+                          Fecha reportada
+                          <input type="date" value={debtBalanceUpdateForm.reported_at_iso} onChange={(event) => setDebtBalanceUpdateForm((current) => ({ ...current, reported_at_iso: event.target.value }))} />
+                        </label>
+                        <label className="span-2">
+                          Nota
+                          <input value={debtBalanceUpdateForm.notes} onChange={(event) => setDebtBalanceUpdateForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Ej. saldo visto en la app del banco" />
+                        </label>
+                        <div className="span-2 action-row">
+                          <button type="button" disabled={saving || !canEditData} onClick={() => void onDebtBalanceUpdateSubmit(item.id)}>Guardar saldo confirmado</button>
+                          <button type="button" className="ghost" onClick={() => { setActiveDebtBalanceUpdateId(null); setDebtBalanceUpdateForm(emptyDebtBalanceUpdate()) }}>Cancelar</button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
               <div className="list-actions">
+                <button type="button" className="ghost" disabled={!canEditData} onClick={() => { setActiveDebtBalanceUpdateId(item.id); setDebtBalanceUpdateForm({ balance_amount: item.balance_amount, reported_at_iso: formatDateOnlyValue(new Date()), notes: '' }) }}>Reportar saldo</button>
                 <button type="button" className="ghost" disabled={!canEditData} onClick={() => onEditDebt(item)}>Editar</button>
                 <button type="button" className="ghost danger" disabled={!canEditData} onClick={() => void onDeleteDebt(item.id)}>Borrar</button>
               </div>

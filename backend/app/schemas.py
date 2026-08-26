@@ -226,6 +226,8 @@ class DebtBase(BaseModel):
     monthly_payment_amount: float = Field(ge=0)
     currency: str = Field(min_length=1, default='DOP')
     payment_day: Optional[int] = Field(default=None, ge=1, le=31)
+    interest_rate_percent: Optional[float] = Field(default=None, ge=0)
+    interest_rate_period: Optional[Literal['monthly', 'annual']] = None
     allow_extra_payment: bool = True
     active: bool = True
     notes: str = ''
@@ -237,6 +239,29 @@ class DebtCreate(DebtBase):
 
 class Debt(DebtBase):
     id: int
+    last_balance_reported_at_iso: Optional[str] = None
+    balance_source: Literal['manual', 'reported'] = 'manual'
+    balance_update_count: int = 0
+    balance_update_stale: bool = False
+    priority_score: float = 0
+    priority_reason: str = ''
+    latest_balance_note: str = ''
+    balance_updates: list['DebtBalanceUpdate'] = Field(default_factory=list)
+
+
+class DebtBalanceUpdateBase(BaseModel):
+    balance_amount: float = Field(ge=0)
+    reported_at_iso: Optional[str] = None
+    notes: str = ''
+
+
+class DebtBalanceUpdateCreate(DebtBalanceUpdateBase):
+    pass
+
+
+class DebtBalanceUpdate(DebtBalanceUpdateBase):
+    id: int
+    debt_id: int
 
 
 class MonthCloseSnapshot(BaseModel):
@@ -330,6 +355,9 @@ class DashboardSummary(BaseModel):
     debt_payment_target: float
     debt_total_balance: float
     debt_extra_payment_capacity: float
+    debt_priority_label: str
+    debt_priority_reason: str
+    stale_debt_update_count: int
     recommended_free_margin_destination: str
     goals_target: float
     goals_reserved: float

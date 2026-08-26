@@ -94,8 +94,26 @@ export interface Debt {
   monthly_payment_amount: number
   currency: string
   payment_day: number | null
+  interest_rate_percent: number | null
+  interest_rate_period: 'monthly' | 'annual' | null
   allow_extra_payment: boolean
   active: boolean
+  notes: string
+  last_balance_reported_at_iso: string | null
+  balance_source: 'manual' | 'reported'
+  balance_update_count: number
+  balance_update_stale: boolean
+  priority_score: number
+  priority_reason: string
+  latest_balance_note: string
+  balance_updates: DebtBalanceUpdate[]
+}
+
+export interface DebtBalanceUpdate {
+  id: number
+  debt_id: number
+  balance_amount: number
+  reported_at_iso: string | null
   notes: string
 }
 
@@ -231,6 +249,9 @@ export interface DashboardSummary {
   debt_payment_target: number
   debt_total_balance: number
   debt_extra_payment_capacity: number
+  debt_priority_label: string
+  debt_priority_reason: string
+  stale_debt_update_count: number
   recommended_free_margin_destination: string
   goals_target: number
   goals_reserved: number
@@ -417,7 +438,15 @@ export interface DebtInput {
   monthly_payment_amount: number
   currency: string
   payment_day: number | null
+  interest_rate_percent: number | null
+  interest_rate_period: 'monthly' | 'annual' | null
   allow_extra_payment: boolean
   active: boolean
+  notes: string
+}
+
+export interface DebtBalanceUpdateInput {
+  balance_amount: number
+  reported_at_iso: string
   notes: string
 }

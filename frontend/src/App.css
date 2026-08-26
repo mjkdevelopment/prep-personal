@@ -405,6 +405,11 @@
 
 .settings-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.settings-grid > .panel {
+  align-self: start;
 }
 
 .theme-grid {
@@ -1261,6 +1266,40 @@ textarea {
   color: var(--muted);
 }
 
+.debt-overview-strip {
+  display: grid;
+  grid-template-columns: 0.9fr 1.25fr 0.85fr;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.debt-overview-metric {
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, white 24%);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--gold) 10%, transparent 90%), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), color-mix(in srgb, var(--paper) 93%, white 7%));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.debt-overview-metric strong {
+  display: block;
+  margin: 8px 0 10px;
+  font-size: 1.5rem;
+}
+
+.debt-overview-metric p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.debt-overview-metric.featured {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 16%, transparent 84%), transparent 44%),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 12%, white 88%), color-mix(in srgb, var(--paper) 93%, white 7%));
+}
+
 .history-tag-row {
   display: flex;
   flex-wrap: wrap;
@@ -1314,6 +1353,165 @@ textarea {
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.debt-card {
+  align-items: flex-start;
+  gap: 18px;
+  padding: 18px;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--plum) 7%, transparent 93%), transparent 36%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), color-mix(in srgb, var(--paper) 92%, white 8%));
+}
+
+.debt-card-main,
+.debt-card-copy {
+  width: 100%;
+}
+
+.debt-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.2fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.debt-card-head p,
+.debt-priority-copy,
+.debt-update-head p,
+.debt-history-footnote {
+  margin: 0;
+  color: var(--muted);
+}
+
+.debt-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.debt-kpi {
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, white 24%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), color-mix(in srgb, var(--paper) 96%, white 4%));
+}
+
+.debt-kpi span,
+.debt-update-head span,
+.debt-history-head small {
+  color: var(--muted);
+}
+
+.debt-kpi strong {
+  display: block;
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
+.debt-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.debt-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, white 24%);
+  background: rgba(255, 255, 255, 0.68);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--muted-strong);
+}
+
+.debt-chip.ok {
+  background: color-mix(in srgb, var(--emerald) 10%, white 90%);
+  border-color: color-mix(in srgb, var(--emerald) 18%, var(--line) 82%);
+}
+
+.debt-chip.alert {
+  background: color-mix(in srgb, var(--terracotta) 10%, white 90%);
+  border-color: color-mix(in srgb, var(--terracotta) 20%, var(--line) 80%);
+}
+
+.debt-priority-copy {
+  margin-top: 14px;
+  font-size: 0.92rem;
+}
+
+.debt-history-block {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--line) 74%, white 26%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), color-mix(in srgb, var(--paper) 94%, white 6%));
+}
+
+.debt-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.debt-history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.debt-history-item {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid color-mix(in srgb, var(--line) 72%, white 28%);
+}
+
+.debt-history-item.current {
+  background: color-mix(in srgb, var(--accent) 9%, white 91%);
+}
+
+.debt-history-item strong,
+.debt-history-item p,
+.debt-history-item small {
+  margin: 0;
+}
+
+.debt-history-item p,
+.debt-history-item small {
+  color: var(--muted);
+}
+
+.debt-history-footnote {
+  margin-top: 10px;
+  font-size: 0.85rem;
+}
+
+.debt-update-panel {
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, white 28%);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--sky) 10%, transparent 90%), transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), color-mix(in srgb, var(--paper) 94%, white 6%));
+}
+
+.debt-update-head {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.debt-update-form {
+  margin-bottom: 0;
 }
 
 .user-access-actions select {
@@ -2141,8 +2339,20 @@ textarea {
   .free-margin-grid,
   .decision-grid,
   .wallet-grid,
-  .wallet-meta-grid {
+  .wallet-meta-grid,
+  .debt-overview-strip {
     grid-template-columns: 1fr;
+  }
+
+  .debt-card-head,
+  .debt-kpi-grid,
+  .debt-history-item,
+  .debt-history-head {
+    grid-template-columns: 1fr;
+  }
+
+  .debt-history-head {
+    justify-content: flex-start;
   }
 
   .wallet-card-top {

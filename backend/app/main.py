@@ -17,7 +17,7 @@ from starlette.background import BackgroundTask
 
 from .database import Database, UserRecord
 from .importer import import_flutter_database
-from .schemas import AdminBootstrapRequest, AuthStatus, CategoryConfigInput, CreditCardCreate, CreditCardStatementCreate, Debt, DebtCreate, EmergencyFundPreferenceUpdate, FixedIncomeSourceCreate, FlutterImportSummary, InitialSetupPayload, LoginRequest, LoginResponse, MonthCloseSnapshot, ObligationCreate, OwnerPanelResponse, PasswordChangeRequest, TagConfigInput, ThemePreferenceUpdate, TransactionCreate, UserAccessUpdateRequest, UserCreateRequest
+from .schemas import AdminBootstrapRequest, AuthStatus, CategoryConfigInput, CreditCardCreate, CreditCardStatementCreate, Debt, DebtBalanceUpdateCreate, DebtCreate, EmergencyFundPreferenceUpdate, FixedIncomeSourceCreate, FlutterImportSummary, InitialSetupPayload, LoginRequest, LoginResponse, MonthCloseSnapshot, ObligationCreate, OwnerPanelResponse, PasswordChangeRequest, TagConfigInput, ThemePreferenceUpdate, TransactionCreate, UserAccessUpdateRequest, UserCreateRequest
 from .services import FinancialSnapshot, build_bootstrap, build_month_close_snapshot, suggest_income_allocation
 
 
@@ -372,6 +372,16 @@ def update_debt(item_id: int, payload: DebtCreate, user: UserRecord = Depends(re
     try:
         item = database.update_debt(user.id, item_id, payload.model_dump())
         database.record_audit(user, 'update_debt', 'debt', item.label, f'Saldo {item.balance_amount:.2f}, pago mensual {item.monthly_payment_amount:.2f}.')
+        return item
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post('/api/debts/{item_id}/balance-updates', response_model=Debt)
+def create_debt_balance_update(item_id: int, payload: DebtBalanceUpdateCreate, user: UserRecord = Depends(require_editor)):
+    try:
+        item = database.create_debt_balance_update(user.id, item_id, payload.model_dump())
+        database.record_audit(user, 'update_debt_balance', 'debt', item.label, f'Saldo confirmado actualizado a {item.balance_amount:.2f}.')
         return item
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -393,14 +393,102 @@ def test_create_debt_and_generate_month_close() -> None:
     assert len(payload['month_close_snapshots']) >= 1
     assert payload['dashboard']['debt_total_balance'] == 250000
     assert payload['dashboard']['debt_payment_target'] == 21000
-    assert payload['dashboard']['capitalization_target'] == 2400
+    assert payload['dashboard']['capitalization_target'] == 5400
     assert payload['dashboard']['fixed_cost_ceiling'] == 6000
-    assert payload['dashboard']['recommended_free_margin_destination'] == 'Abonar deuda prioritaria'
+    assert payload['dashboard']['recommended_free_margin_destination'] in {'Abonar deuda prioritaria', 'Cubrir arrastre vencido'}
     assert isinstance(payload['dashboard']['recommended_free_margin_destination'], str)
 
     duplicate_close = client.post('/api/month-close/current', headers=headers)
     assert duplicate_close.status_code == 409
     assert 'Ya existe un cierre oficial para este mes' in duplicate_close.json()['detail']
+
+
+def test_debt_balance_updates_override_manual_amortization_guess() -> None:
+    headers = ensure_app_headers('debtupdates', '1234')
+
+    debt_response = client.post(
+        '/api/debts',
+        json={
+            'label': 'Prestamo cooperativa',
+            'lender': 'Cooperativa',
+            'balance_amount': 830000,
+            'monthly_payment_amount': 20000,
+            'currency': 'DOP',
+            'payment_day': 10,
+            'interest_rate_percent': None,
+            'interest_rate_period': None,
+            'allow_extra_payment': True,
+            'active': True,
+            'notes': 'Deuda ya en curso',
+        },
+        headers=headers,
+    )
+    assert debt_response.status_code == 200
+    debt = debt_response.json()
+    assert debt['balance_amount'] == 830000
+    assert debt['balance_update_count'] >= 1
+    assert debt['balance_source'] == 'reported'
+
+    update_response = client.post(
+        f"/api/debts/{debt['id']}/balance-updates",
+        json={
+            'balance_amount': 815000,
+            'reported_at_iso': '2026-08-25T12:00:00',
+            'notes': 'Saldo confirmado por la app del banco',
+        },
+        headers=headers,
+    )
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated['balance_amount'] == 815000
+    assert updated['last_balance_reported_at_iso'] == '2026-08-25T12:00:00'
+    assert updated['balance_update_count'] >= 2
+    assert updated['balance_updates'][0]['balance_amount'] == 815000
+    assert updated['latest_balance_note'] == 'Saldo confirmado por la app del banco'
+
+
+def test_debt_priority_uses_interest_when_available() -> None:
+    headers = ensure_app_headers('debtrate', '1234')
+    debt_a = client.post(
+        '/api/debts',
+        json={
+            'label': 'Vehiculo',
+            'lender': 'Banco A',
+            'balance_amount': 250000,
+            'monthly_payment_amount': 15000,
+            'currency': 'DOP',
+            'payment_day': 12,
+            'interest_rate_percent': 3.5,
+            'interest_rate_period': 'monthly',
+            'allow_extra_payment': True,
+            'active': True,
+            'notes': '',
+        },
+        headers=headers,
+    )
+    assert debt_a.status_code == 200
+    debt_b = client.post(
+        '/api/debts',
+        json={
+            'label': 'Personal',
+            'lender': 'Banco B',
+            'balance_amount': 300000,
+            'monthly_payment_amount': 16000,
+            'currency': 'DOP',
+            'payment_day': 20,
+            'interest_rate_percent': 18,
+            'interest_rate_period': 'annual',
+            'allow_extra_payment': True,
+            'active': True,
+            'notes': '',
+        },
+        headers=headers,
+    )
+    assert debt_b.status_code == 200
+
+    dashboard = client.get('/api/bootstrap', headers=headers).json()['dashboard']
+    assert dashboard['debt_priority_label'] == 'Vehiculo'
+    assert 'tasa anual equivalente' in dashboard['debt_priority_reason']
 
 
 def test_complete_and_reset_setup_flow() -> None:

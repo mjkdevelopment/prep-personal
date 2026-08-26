@@ -4,6 +4,8 @@ import type {
   BootstrapResponse,
   CategoryConfig,
   CategoryConfigInput,
+  Debt,
+  DebtBalanceUpdateInput,
   CreditCardInput,
   CreditCardStatementInput,
   DebtInput,
@@ -144,6 +146,7 @@ export const updateCreditCardStatement = (id: number, payload: CreditCardStateme
 export const deleteCreditCardStatement = (id: number) => request(`/credit-card-statements/${id}`, { method: 'DELETE' })
 export const createDebt = (payload: DebtInput) => request('/debts', { method: 'POST', body: JSON.stringify(payload) })
 export const updateDebt = (id: number, payload: DebtInput) => request(`/debts/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+export const createDebtBalanceUpdate = (id: number, payload: DebtBalanceUpdateInput) => request<Debt>(`/debts/${id}/balance-updates`, { method: 'POST', body: JSON.stringify(payload) })
 export const deleteDebt = (id: number) => request(`/debts/${id}`, { method: 'DELETE' })
 export const previewCurrentMonthClose = () => request<MonthCloseSnapshot>('/month-close/current/preview', { method: 'POST' })
 export const generateCurrentMonthClose = () => request<MonthCloseSnapshot>('/month-close/current', { method: 'POST' })
