@@ -2244,7 +2244,7 @@ function TransactionsTab({
   const matchedCommandTag = findTagByLabel(data.tags, tagCommandInput)
 
   return (
-    <section className="content-grid single-focus">
+    <section className="content-grid single-focus content-masonry">
       {!canEditData ? <div className="banner">Tu perfil es de consulta. Puedes revisar el historial, pero no registrar ni editar movimientos.</div> : null}
       <Panel title={editingTransactionId ? 'Editar movimiento' : 'Registrar movimiento'} className={`transaction-panel kind-${transactionForm.kind}`}>
         <div className={`form-live-banner kind-${transactionForm.kind}`}>
@@ -2633,7 +2633,7 @@ function BaseTab({
   const cardBoundObligations = selectedStatementCard ? data.obligations.filter((item) => item.credit_card_id === selectedStatementCard.id) : []
 
   return (
-    <section className="content-grid">
+    <section className="content-grid content-masonry">
       {!canEditData ? <div className="banner">Tu perfil es de consulta. La base financiera queda bloqueada para cambios.</div> : null}
       <Panel title="Ingresos fijos" subtitle="Base mensual.">
         <form className="form-grid dynamic-form compact" onSubmit={onFixedIncomeSubmit}>
